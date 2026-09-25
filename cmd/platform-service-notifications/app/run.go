@@ -1,4 +1,3 @@
-//go:generate opencontrolplane-gen
 package app
 
 import (
@@ -30,18 +29,14 @@ import (
 	openmcpconst "github.com/openmcp-project/openmcp-operator/api/constants"
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
 
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/api/providerscheme"
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/api/v1alpha1"
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/internal/controller"
+	"github.com/openmcp-project/platform-service-notifications/api/providerscheme"
+	"github.com/openmcp-project/platform-service-notifications/internal/controller"
+	"github.com/openmcp-project/platform-service-notifications/internal/notify"
+	"github.com/openmcp-project/platform-service-notifications/internal/notify/email"
+	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
-// opencontrolplane-gen:if WATCH=onboarding
 const debugEnvVar = "DEV_DEBUG"
-
-// opencontrolplane-gen:fi
 
 var setupLog logging.Logger
 
@@ -223,10 +218,8 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	setupLog.Info("Environment", "value", o.Environment)
 	setupLog.Info("ProviderName", "value", o.ProviderName)
 
-	// opencontrolplane-gen:if WATCH=onboarding
 	setupLog.Info("Getting access to the onboarding cluster")
 	onboardingScheme := providerscheme.InstallOperatorAPIsOnboarding(runtime.NewScheme())
-	// opencontrolplane-gen:fi
 
 	providerSystemNamespace := os.Getenv(openmcpconst.EnvVariablePodNamespace)
 	if providerSystemNamespace == "" {
@@ -239,15 +232,22 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		WithTimeout(30 * time.Minute)
 
 	var onboardingCluster *clusters.Cluster
-	// opencontrolplane-gen:if WATCH=onboarding
 	onboardingClusterPermissions := []clustersv1alpha1.PermissionsRequest{
 		{
 			Rules: []rbacv1.PolicyRule{
 				{
-					APIGroups: []string{v1alpha1.GroupVersion.Group},
-					// opencontrolplane-gen:replace foo=KIND_LOWER
-					Resources: []string{"foos", "foos/status"},
-					Verbs:     []string{"*"},
+					// Membership signals: Projects/Workspaces and V2 ControlPlanes.
+					APIGroups: []string{"core.openmcp.cloud", "core.open-control-plane.io"},
+					Resources: []string{"projects", "workspaces", "controlplanes"},
+					Verbs:     []string{"get", "list", "watch"},
+				},
+				{
+					// Service instances mapped from ServiceProvider.status.resources have dynamic
+					// GVKs, so we need read access to arbitrary resources to locate affected
+					// control planes. TODO: tighten once the set of service GVKs is enumerable.
+					APIGroups: []string{"*"},
+					Resources: []string{"*"},
+					Verbs:     []string{"get", "list", "watch"},
 				},
 			},
 		},
@@ -256,15 +256,12 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating/updating onboarding cluster: %w", err)
 	}
-	// opencontrolplane-gen:fi
 
 	webhookServer := webhook.NewServer(webhook.Options{
 		TLSOpts: o.WebhookTLSOpts,
 	})
 	cluster := o.PlatformCluster //nolint:ineffassign,staticcheck
-	// opencontrolplane-gen:if WATCH=onboarding
 	cluster = onboardingCluster
-	// opencontrolplane-gen:fi
 
 	mgr, err := ctrl.NewManager(cluster.RESTConfig(), ctrl.Options{
 		Scheme:                 cluster.Scheme(),
@@ -273,8 +270,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		HealthProbeBindAddress: o.ProbeAddr,
 		PprofBindAddress:       o.PprofAddr,
 		LeaderElection:         o.EnableLeaderElection,
-		// opencontrolplane-gen:replace foo=KIND_LOWER
-		LeaderElectionID: "github.com/openmcp-project/platform-service-foo",
+		LeaderElectionID:       "notifications.platform.open-control-plane.io",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -294,10 +290,35 @@ func (o *RunOptions) Run(ctx context.Context) error {
 		return fmt.Errorf("unable to add platform cluster to manager: %w", err)
 	}
 
-	// opencontrolplane-gen:replace Foo=KIND
-	if err := controller.NewFooReconciler(o.PlatformCluster, onboardingCluster, o.ProviderName).SetupWithManager(mgr); err != nil {
-		// opencontrolplane-gen:replace Foo=KIND
-		return fmt.Errorf("unable to add FooReconciler to manager: %w", err)
+	// Build the delivery subsystem. All persisted state (records, profiles) lives on the
+	// platform cluster, so the Store uses the platform client.
+	notifStore := store.NewK8sStore(o.PlatformCluster.Client())
+	renderer, err := email.NewRenderer()
+	if err != nil {
+		return fmt.Errorf("unable to compile email templates: %w", err)
+	}
+	// The sender starts unconfigured; the ConfigReconciler fills in SMTP settings/credentials
+	// from the NotificationConfig and its referenced Secret.
+	sender := email.NewSender(email.Config{})
+	pipeline := notify.NewPipeline(notifStore, renderer, notify.Settings{}, sender)
+
+	if err := controller.NewConfigReconciler(o.PlatformCluster, pipeline, sender, o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add ConfigReconciler to manager: %w", err)
+	}
+	if err := controller.NewProjectMembershipReconciler(onboardingCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add ProjectMembershipReconciler to manager: %w", err)
+	}
+	if err := controller.NewWorkspaceMembershipReconciler(onboardingCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add WorkspaceMembershipReconciler to manager: %w", err)
+	}
+	if err := controller.NewControlPlaneMembershipReconciler(onboardingCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add ControlPlaneMembershipReconciler to manager: %w", err)
+	}
+	if err := controller.NewEnablementReconciler(o.PlatformCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add EnablementReconciler to manager: %w", err)
+	}
+	if err := controller.NewVersionDigestReconciler(o.PlatformCluster, onboardingCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add VersionDigestReconciler to manager: %w", err)
 	}
 
 	if o.MetricsCertWatcher != nil {
@@ -329,7 +350,6 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	return nil
 }
 
-// opencontrolplane-gen:if WATCH=onboarding
 func requestOnboardingClusterAccess(ctx context.Context, mgr clusteraccess.Manager, platformCluster *clusters.Cluster, onboardingScheme *runtime.Scheme, permissions []clustersv1alpha1.PermissionsRequest, providerName string) (*clusters.Cluster, error) {
 	cluster, err := mgr.CreateAndWaitForCluster(ctx, "onboarding-run", clustersv1alpha1.PURPOSE_ONBOARDING, onboardingScheme, permissions)
 	if err != nil {
@@ -358,5 +378,3 @@ func debugEnabled() bool {
 	v := strings.ToLower(os.Getenv(debugEnvVar))
 	return v == "1" || v == "true"
 }
-
-// opencontrolplane-gen:fi

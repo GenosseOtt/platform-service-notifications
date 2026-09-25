@@ -1,0 +1,15 @@
+{{- $product := .ProductName}}{{if not $product}}{{$product = "Open Control Plane"}}{{end -}}
+You've been added to a {{.ResourceKind}}
+
+Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
+
+You have been granted the {{.Role}} role on the {{.ResourceKind}} "{{if .ResourceDisplayName}}{{.ResourceDisplayName}}{{else}}{{.ResourceName}}{{end}}"{{if .Actor}} by {{.Actor}}{{end}}.
+
+  {{.ResourceKind}}: {{.ResourceName}}
+  Role:     {{.Role}}
+{{if .ConsoleURL}}
+Open in console: {{.ConsoleURL}}
+{{end}}
+--
+You received this message because of activity on the {{$product}} platform.
+To change what you are notified about or to opt out, update your notification preferences.

@@ -1,4 +1,3 @@
-//go:generate opencontrolplane-gen
 package app
 
 import (
@@ -18,10 +17,8 @@ import (
 
 	"github.com/openmcp-project/openmcp-operator/lib/clusteraccess"
 
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/api/crds"
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/api/providerscheme"
+	"github.com/openmcp-project/platform-service-notifications/api/crds"
+	"github.com/openmcp-project/platform-service-notifications/api/providerscheme"
 )
 
 func NewInitCommand(so *SharedOptions) *cobra.Command {
@@ -78,12 +75,10 @@ func (o *InitOptions) Run(ctx context.Context) error {
 	log.Info("Environment", "value", o.Environment)
 	log.Info("ProviderName", "value", o.ProviderName)
 
-	// opencontrolplane-gen:if WATCH=onboarding
 	log.Info("Getting access to the onboarding cluster")
 	onboardingScheme := runtime.NewScheme()
 	providerscheme.InstallOperatorAPIsOnboarding(onboardingScheme)
 	providerscheme.InstallCRDAPIs(onboardingScheme)
-	// opencontrolplane-gen:fi
 
 	providerSystemNamespace := os.Getenv(openmcpconst.EnvVariablePodNamespace)
 	if providerSystemNamespace == "" {
@@ -95,7 +90,6 @@ func (o *InitOptions) Run(ctx context.Context) error {
 		WithInterval(10 * time.Second).
 		WithTimeout(30 * time.Minute)
 
-	// opencontrolplane-gen:if WATCH=onboarding
 	onboardingCluster, err := clusterAccessManager.CreateAndWaitForCluster(ctx, clustersv1alpha1.PURPOSE_ONBOARDING+"-init", clustersv1alpha1.PURPOSE_ONBOARDING,
 		onboardingScheme, []clustersv1alpha1.PermissionsRequest{
 			{
@@ -112,15 +106,12 @@ func (o *InitOptions) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating/updating onboarding cluster: %w", err)
 	}
-	// opencontrolplane-gen:fi
 
 	// apply CRDs
 	log.Info("Creating/updating CRDs")
 	crdManager := crdutil.NewCRDManager(openmcpconst.ClusterLabel, crds.CRDs)
 	crdManager.AddCRDLabelToClusterMapping(clustersv1alpha1.PURPOSE_PLATFORM, o.PlatformCluster)
-	// opencontrolplane-gen:if WATCH=onboarding
 	crdManager.AddCRDLabelToClusterMapping(clustersv1alpha1.PURPOSE_ONBOARDING, onboardingCluster)
-	// opencontrolplane-gen:fi
 	if err := crdManager.CreateOrUpdateCRDs(ctx, &log); err != nil {
 		return fmt.Errorf("error creating/updating CRDs: %w", err)
 	}

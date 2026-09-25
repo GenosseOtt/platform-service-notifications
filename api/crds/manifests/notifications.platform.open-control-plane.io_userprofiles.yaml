@@ -5,20 +5,25 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
   labels:
-    openmcp.cloud/cluster: onboarding
-  name: foos.foo.platform.open-control-plane.io
+    openmcp.cloud/cluster: platform
+  name: userprofiles.notifications.platform.open-control-plane.io
 spec:
-  group: foo.platform.open-control-plane.io
+  group: notifications.platform.open-control-plane.io
   names:
-    kind: Foo
-    listKind: FooList
-    plural: foos
-    singular: foo
-  scope: Namespaced
+    kind: UserProfile
+    listKind: UserProfileList
+    plural: userprofiles
+    shortNames:
+    - uprof
+    singular: userprofile
+  scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.phase
-      name: Phase
+    - jsonPath: .spec.subject.name
+      name: Subject
+      type: string
+    - jsonPath: .status.resolvedEmail
+      name: Email
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -26,11 +31,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: |-
-          opencontrolplane-gen:replace Foo=KIND
-          Foo is the Schema for the Foo API
-          opencontrolplane-gen:replace onboarding=WATCH
-          opencontrolplane-gen:replace Foo=KIND
+        description: UserProfile is the Schema for the UserProfile API.
         properties:
           apiVersion:
             description: |-
@@ -50,22 +51,68 @@ spec:
           metadata:
             type: object
           spec:
-            description: |-
-              opencontrolplane-gen:replace Foo=KIND
-              spec defines the desired state of Foo
-              opencontrolplane-gen:replace Foo=KIND
+            description: spec defines the desired state of UserProfile
             properties:
-              foo:
+              email:
                 description: |-
-                  opencontrolplane-gen:replace Foo=KIND
-                  foo is an example field of Foo. Edit api_types.go to remove/update
+                  Email overrides the address used for email delivery. When empty, the address is
+                  resolved from the subject (see NotificationConfig.spec.usernameIsEmail).
                 type: string
+              preferences:
+                description: Preferences captures the user's opt-out and channel choices.
+                properties:
+                  channels:
+                    description: Channels selects preferred delivery channels. When
+                      empty, the config default is used.
+                    items:
+                      description: Channel is a delivery transport for a notification.
+                      enum:
+                      - Email
+                      - Slack
+                      type: string
+                    type: array
+                  optOutAll:
+                    description: OptOutAll disables all notifications for this user.
+                    type: boolean
+                  optOutCategories:
+                    description: OptOutCategories disables specific categories for
+                      this user.
+                    items:
+                      description: Category is the type of activity a notification
+                        is about.
+                      enum:
+                      - MembershipAdded
+                      - UserEnablement
+                      - NewServiceVersion
+                      type: string
+                    type: array
+                type: object
+              subject:
+                description: Subject is the identity this profile belongs to.
+                properties:
+                  kind:
+                    description: Kind is the kind of the subject.
+                    enum:
+                    - User
+                    - Group
+                    - ServiceAccount
+                    type: string
+                  name:
+                    description: Name is the identity string. For Kind=User this is
+                      the OIDC username (an email in practice).
+                    type: string
+                  namespace:
+                    description: Namespace is only required for Kind=ServiceAccount.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+            required:
+            - subject
             type: object
           status:
-            description: |-
-              opencontrolplane-gen:replace Foo=KIND
-              status defines the observed state of Foo
-              opencontrolplane-gen:replace Foo=KIND
+            description: status defines the observed state of UserProfile
             properties:
               conditions:
                 description: Conditions contains the conditions.
@@ -127,6 +174,16 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              enablementSentAt:
+                description: EnablementSentAt records when the one-time enablement
+                  email was sent.
+                format: date-time
+                type: string
+              firstSeen:
+                description: FirstSeen is when this identity was first observed on
+                  the platform.
+                format: date-time
+                type: string
               observedGeneration:
                 description: ObservedGeneration is the generation of this resource
                   that was last reconciled by the controller.
@@ -134,6 +191,10 @@ spec:
                 type: integer
               phase:
                 description: Phase is the current phase of the resource.
+                type: string
+              resolvedEmail:
+                description: ResolvedEmail is the address the controller resolved
+                  for this user.
                 type: string
             required:
             - observedGeneration

@@ -1,4 +1,3 @@
-//go:generate opencontrolplane-gen
 package providerscheme
 
 import (
@@ -8,8 +7,11 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	clustersv1alpha1 "github.com/openmcp-project/openmcp-operator/api/clusters/v1alpha1"
-	// opencontrolplane-gen:replace github.com/openmcp-project/platform-service-template=MODULE
-	"github.com/openmcp-project/platform-service-template/api/v1alpha1"
+	cpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
+	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
+	pwv1alpha1 "github.com/openmcp-project/project-workspace-operator/api/core/v1alpha1"
+
+	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 )
 
 // InstallCRDAPIs installs the CRD APIs in the scheme.
@@ -21,17 +23,24 @@ func InstallCRDAPIs(scheme *runtime.Scheme) *runtime.Scheme {
 	return scheme
 }
 
+// InstallOperatorAPIsPlatform builds the scheme for the platform cluster. Our own CRDs
+// (NotificationConfig/UserProfile/NotificationRecord) and the ServiceProvider we watch all live
+// on the platform cluster.
 func InstallOperatorAPIsPlatform(scheme *runtime.Scheme) *runtime.Scheme {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(clustersv1alpha1.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // required for providerconfig resource
+	utilruntime.Must(providerv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
 	return scheme
 }
 
+// InstallOperatorAPIsOnboarding builds the scheme for the onboarding cluster, where the
+// membership signals live: Projects/Workspaces and V2 ControlPlanes.
 func InstallOperatorAPIsOnboarding(scheme *runtime.Scheme) *runtime.Scheme {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(v1alpha1.AddToScheme(scheme)) // required for fooservice resource
+	utilruntime.Must(pwv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(cpv2alpha1.AddToScheme(scheme))
 
 	return scheme
 }

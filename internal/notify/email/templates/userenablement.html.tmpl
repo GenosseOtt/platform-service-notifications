@@ -1,0 +1,27 @@
+{{define "content" -}}
+{{- $product := .ProductName}}{{if not $product}}{{$product = "Open Control Plane"}}{{end -}}
+<h1 style="margin:0 0 16px; font-size:22px; line-height:28px; color:#1a1a1a;">Welcome to {{$product}}</h1>
+<p style="margin:0 0 16px; font-size:15px; line-height:22px; color:#33363a;">
+Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
+</p>
+<p style="margin:0 0 20px; font-size:15px; line-height:22px; color:#33363a;">
+Your account is now active on {{$product}}. From here you can be added to
+projects and workspaces, and manage control planes your teams rely on.
+</p>
+<p style="margin:0 0 20px; font-size:15px; line-height:22px; color:#33363a;">
+To get started, take a look at the documentation and open the console.
+</p>
+<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+{{if .ConsoleURL -}}
+<td style="border-radius:6px; background-color:#0a6ed1;">
+<a href="{{.ConsoleURL}}" style="display:inline-block; padding:12px 24px; font-size:15px; font-weight:600; color:#ffffff; text-decoration:none;">Open console</a>
+</td>
+<td style="width:12px;">&nbsp;</td>
+{{- end}}
+{{if .DocsURL -}}
+<td style="border-radius:6px; border:1px solid #0a6ed1;">
+<a href="{{.DocsURL}}" style="display:inline-block; padding:12px 24px; font-size:15px; font-weight:600; color:#0a6ed1; text-decoration:none;">Read the docs</a>
+</td>
+{{- end}}
+</tr></table>
+{{- end}}

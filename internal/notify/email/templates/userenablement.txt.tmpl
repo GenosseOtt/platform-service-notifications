@@ -1,0 +1,15 @@
+{{- $product := .ProductName}}{{if not $product}}{{$product = "Open Control Plane"}}{{end -}}
+Welcome to {{$product}}
+
+Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
+
+Your account is now active on {{$product}}. From here you can be
+added to projects and workspaces, and manage control planes your teams rely on.
+
+To get started:
+{{if .ConsoleURL}}  Open the console: {{.ConsoleURL}}
+{{end}}{{if .DocsURL}}  Read the docs:    {{.DocsURL}}
+{{end}}
+--
+You received this message because of activity on the {{$product}} platform.
+To change what you are notified about or to opt out, update your notification preferences.

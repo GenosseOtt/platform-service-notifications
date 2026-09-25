@@ -1,4 +1,3 @@
-//go:generate opencontrolplane-gen
 package e2e
 
 import (
@@ -41,10 +40,8 @@ func TestMain(m *testing.M) {
 		},
 		PlatformServices: []platformservices.PlatformServiceSetup{
 			{
-				// opencontrolplane-gen:replace foo=SERVICE_NAME
-				Name: "foo",
-				// opencontrolplane-gen:replace template=SERVICE_NAME
-				Image:              fmt.Sprintf("ghcr.io/openmcp-project/images/platform-service-template:%s", version),
+				Name:               "notifications",
+				Image:              fmt.Sprintf("ghcr.io/openmcp-project/images/platform-service-notifications:%s", version),
 				LoadImageToCluster: true,
 			},
 		},

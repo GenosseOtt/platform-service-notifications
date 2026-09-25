@@ -1,105 +1,218 @@
-[![REUSE status](https://api.reuse.software/badge/github.com/openmcp-project/platform-service-template)](https://api.reuse.software/info/github.com/openmcp-project/platform-service-template)
+# platform-service-notifications
 
-# platform-service-template
+An [Open Control Plane](https://open-control-plane.io) (openmcp) **Platform Service** that keeps
+users informed about what happens around them on the platform — starting with email.
 
-## About this project
+## Purpose
 
-A template for building @openmcp-project Platform Services.
+This service notifies platform users about activity that concerns them:
 
-## Requirements and Setup
+- A user is added to a `Project`, `Workspace`, or `ControlPlane` → they get an email with a deep
+  link to the resource.
+- A user is seen on the platform for the first time → they get a one-time welcome / enablement
+  email pointing at the docs.
+- A newer version of a service becomes available → the admins of the affected `ControlPlane`s get
+  **one aggregated digest each** (never one email per control plane).
 
-1. Create a new repository based on this template.
-2. Install [opencontrolplane-gen](https://github.com/openmcp-project/opencontrolplane-gen).
-3. Use `task template:generate-service` to create a new Platform Service.
-4. Test your Platform Service with `task test-e2e`.
+Two guarantees underpin all of this:
 
-The template generates a basic Platform Service with a [Config](https://open-control-plane.io/developers/platformservice/design#config) and [API](https://open-control-plane.io/developers/platformservice/design#api) CRD.
+- **No double-notifications.** Every notification is recorded; a user is never told about the
+  same event twice, even across restarts, retries, or repeated reconciles.
+- **Opt-out is always honored.** A user can disable all notifications or specific categories.
 
-For a detailed guide on setup and usage, please refer to the full [Platform Service Development Guide](https://open-control-plane.io/developers/platformservice/develop).
+## What it notifies about
 
-## Template Taskfiles
+| Category | Trigger | Recipient |
+|---|---|---|
+| `MembershipAdded` | A subject is added to a `Project`, `Workspace`, or (V2) `ControlPlane` | the added user |
+| `UserEnablement` | A user is seen on the platform for the first time | the new user (once) |
+| `NewServiceVersion` | A service's image (version) changes | admins of the affected ControlPlanes, **aggregated into one digest per admin** |
 
-This template contains two Taskfiles:
+## How it works
 
-- Taskfile.yaml contains the tasks to use once you created a Platform Service based on this template.
-- Taskfile_template.yaml contains the tasks to use while working with the template. This Taskfile can be removed once you used this template to create a Platform Service.
-
-The following sections give a brief overview of the template specific tasks.
-
-### User tasks
-
-To generate a new Platform Service, use `task template:generate-service`:
-
-```shell
-task template:generate-service name=foo api=Foo watch=platform module=github.com/yourorg/platform-service-foo
+```
+              PLATFORM cluster                         ONBOARDING cluster
+  ┌───────────────────────────────────┐   ┌────────────────────────────────────┐
+  │ NotificationConfig (singleton)     │   │ Project / Workspace / ControlPlane  │
+  │ UserProfile   (registry + opt-out) │   │ ServiceProvider resources map to    │
+  │ NotificationRecord (dedup ledger)  │   │ per-ControlPlane service instances  │
+  │ ServiceProvider (version source)   │   └────────────────────────────────────┘
+  └───────────────────────────────────┘                    ▲
+                 ▲     reconcilers watch  ─────────────────┘
+                 │
+     ┌───────────┴───────────────────────────────┐
+     │ pipeline: dedup → render → send → record   │
+     │ Notifier: Email (SMTP, go-mail)  [Slack later] │
+     └────────────────────────────────────────────┘
 ```
 
-Add `dryrun=true` to print the result without applying the changes to disk.
+- **Persistence is Kubernetes-native.** Three CRDs (`openmcp.cloud/cluster=platform`) hold all
+  state — no external database or queue. Everything goes through a small `Store` interface, so a
+  different backend could be swapped in later without touching the reconcilers.
+  - `NotificationConfig` — the platform-owner configuration (singleton, named after the provider).
+  - `UserProfile` — one per user identity; doubles as the **registry**, the **email resolution**,
+    and the **opt-out store**.
+  - `NotificationRecord` — the **dedup ledger**; a deterministic record name derived from
+    `hash(recipient + category + eventKey)` makes "create-or-AlreadyExists" the atomic
+    delivery gate. Records are TTL-pruned (`recordRetention`, default 30 days).
+- **Delivery** is behind a `Notifier` interface. Email is the first implementation
+  ([github.com/wneessen/go-mail](https://github.com/wneessen/go-mail), `multipart/alternative`
+  HTML + plaintext, STARTTLS/auth). Templates are rendered with `html/template` + `text/template`
+  and embedded via `go:embed`.
+- **Effectively-once** = at-least-once delivery + the dedup ledger. A `Pending`/`Failed` record is
+  re-claimable so a transient SMTP failure retries; only `Delivered`/`Suppressed` are terminal.
 
-`template:generate-service` supports the following arguments:
+## Configuring it as a platform operator
 
-- `dryrun`: Print in-memory result to stdout without altering any files (default false)
-- `name`: Name of the platform service (default "example")
-- `api`: Name of the API to create on the watched cluster (default "Example")
-- `watch`: The cluster to watch, allowed values are "platform" or "onboarding" (default "platform")
-- `module` The go module name of your platform service (default "github.com/openmcp-project/platform-service-example")
+The service is deployed like any other openmcp Platform Service: the operator's cluster-scoped
+`PlatformService` CR runs the image's `init` (installs CRDs, requests cluster access) and `run`
+(the controller manager) commands. Everything below is applied to the **platform** cluster.
 
-### Development tasks
+### 1. (Optional) SMTP credentials Secret
 
-The following tasks are useful to test any template code changes.
+Create a Secret with `username` and `password` keys in the provider's namespace. Omit this
+entirely for an unauthenticated relay (e.g. MailHog in tests).
 
-- `template:dev:gen`: Executes the template with the default values to render "platform-service-example" for local development.
-- `template:dev:img`: Builds a container image for "platform-service-example". This also includes code validating.
-- `template:dev:e2e`: Executes e2e tests for "platform-service-example".
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: notifications-smtp
+  namespace: openmcp-system   # the provider's namespace (POD_NAMESPACE)
+type: Opaque
+stringData:
+  username: apikey
+  password: "<smtp-password>"
+```
 
-All `template:dev` tasks support the following arguments:
+### 2. The `NotificationConfig` singleton
 
-- `watch`: defines where the platform service API is created. Supported values are "platform" and "onboarding" (default "platform")
-- `debug`: enables debug logs of [opencontrolplane-gen](https://github.com/openmcp-project/opencontrolplane-gen).
+The object's name **must equal the provider name** (`notifications`). It is cluster-scoped.
 
-## Platform Service Runtime Flags
+```yaml
+apiVersion: notifications.platform.open-control-plane.io/v1alpha1
+kind: NotificationConfig
+metadata:
+  name: notifications
+spec:
+  productName: Acme Cloud                        # shown in subjects/bodies (default "Open Control Plane")
+  webappUrl: https://mycompany.eu                # base of the platform web UI (hash-router SPA)
+  docsURL: https://mycompany.eu/help/            # user docs link, surfaced in the welcome email
+  # usernameIsEmail: true                        # default: a User subject's Name is its email
+  # enabledCategories: []                        # empty = all categories
+  # enabledChannels: [Email]                     # default
+  email:
+    host: smtp.example.com
+    port: 587                # default 587
+    startTLS: true           # default true
+    senderAddress: no-reply@example.com
+    senderName: OpenMCP Notifications
+    replyTo: platform-team@example.com
+    secretRef:
+      name: notifications-smtp    # omit for no-auth relays
+  newVersionDigest:
+    aggregationWindow: 1h    # collect affected control planes before sending one digest per admin
+  recordRetention: 720h      # how long delivered records are kept (default 30d)
+```
 
-The generated platform service supports the following runtime flags:
+The `ConfigReconciler` applies this live: changing the config or its Secret hot-reloads the SMTP
+settings without a restart, and the object reports a `Ready` condition once applied.
 
-- `--verbosity`: Logging verbosity level (see [controller-runtime logging](https://github.com/kubernetes-sigs/controller-runtime/blob/main/TMP-LOGGING.md))
-- `--environment`: Name of the environment (required for operation)
-- `--provider-name`: Name of the provider resource (required for operation)
-- `--metrics-bind-address`: Address for the metrics endpoint (default: `0`, use `:8443` for HTTPS or `:8080` for HTTP)
-- `--health-probe-bind-address`: Address for health probe endpoint (default: `:8081`)
-- `--leader-elect`: Enable leader election for controller manager (default: `false`)
-- `--metrics-secure`: Serve metrics endpoint securely via HTTPS (default: `true`)
-- `--enable-http2`: Enable HTTP/2 for metrics and webhook servers (default: `false`)
+> **No `email` block?** The config still reaches `Ready`, but email delivery is inert until SMTP
+> is configured. This is the smoke-test path exercised by the e2e suite.
 
-For a complete list of available flags, run the generated binary with `-h` or `--help`.
+### 3. Deploy via `PlatformService`
 
-## Support, Feedback, Contributing
+```yaml
+apiVersion: openmcp.cloud/v1alpha1
+kind: PlatformService
+metadata:
+  name: notifications
+spec:
+  image: ghcr.io/openmcp-project/images/platform-service-notifications:<version>
+  initCommand: ["init"]
+  runCommand: ["run"]
+```
 
-This project is open to feature requests/suggestions, bug reports etc. via [GitHub issues](https://github.com/openmcp-project/platform-service-template/issues). Contribution and feedback are encouraged and always welcome. For more information about how to contribute, the project structure, as well as additional contribution information, see our [Contribution Guidelines](https://github.com/openmcp-project/.github/blob/main/CONTRIBUTING.md).
+The `init` job requests **read-only** (`get;list;watch`) access on the onboarding cluster to
+`projects`, `workspaces`, `controlplanes`, and (currently, broadly) other resources so it can
+resolve the dynamically-typed service instances back to their ControlPlanes.
 
-## Security / Disclosure
+### Per-user opt-out
 
-If you find any bug that may be a security problem, please follow our instructions at [in our security policy](https://github.com/openmcp-project/platform-service-template/security/policy) on how to report it. Please do not create GitHub issues for security-related doubts or problems.
+Users (or an admin on their behalf) control delivery through their `UserProfile` on the platform
+cluster:
 
-## Code of Conduct
+```yaml
+apiVersion: notifications.platform.open-control-plane.io/v1alpha1
+kind: UserProfile
+metadata:
+  name: up-<hash>          # created automatically; matched by spec.subject
+spec:
+  subject:
+    kind: User
+    name: priya@example.com
+  email: priya.work@example.com    # optional override of the resolved address
+  preferences:
+    optOutAll: false
+    optOutCategories: [NewServiceVersion]   # silence just the version digests
+```
 
-We as members, contributors, and leaders pledge to make participation in our community a harassment-free experience for everyone. By participating in this project, you agree to abide by its [Code of Conduct](https://github.com/openmcp-project/.github/blob/main/CODE_OF_CONDUCT.md) at all times.
+## Trying it in a local `ocpctl` test landscape
+
+The e2e harness spins up a full openmcp landscape in **kind** (via
+[`openmcp-testing`](https://github.com/openmcp-project/openmcp-testing)), loads a locally built
+image of this service, deploys it as a `PlatformService`, and asserts behavior.
+
+```shell
+# 1. Build the provider image locally and run the e2e suite against a fresh kind landscape.
+task test-e2e
+```
+
+`task test-e2e` (see [Taskfile.yaml](Taskfile.yaml)) builds
+`ghcr.io/openmcp-project/images/platform-service-notifications:<version>` and hands it to the
+harness in [test/e2e/main_test.go](test/e2e/main_test.go), which:
+
+1. creates the platform cluster and installs the `openmcp-operator`,
+2. registers the `kind` cluster provider,
+3. deploys this service as the `notifications` `PlatformService` (with `LoadImageToCluster`),
+4. runs [test/e2e/platformservice_test.go](test/e2e/platformservice_test.go): it creates the
+   `NotificationConfig` singleton and waits for its `Ready` condition, then deletes it.
+
+> If you run `go test ./test/e2e/...` directly you'll see
+> *"image ... not present locally"* — the image must be built first, which is why `task test-e2e`
+> is the entry point.
+
+### Exercising real delivery locally
+
+To watch actual emails, add a **MailHog** SMTP sidecar to the landscape and point the
+`NotificationConfig` at it (`host: mailhog`, `port: 1025`, `startTLS: false`, no `secretRef`), then:
+
+- create a `Project` with a new member → expect one email in MailHog **and** a
+  `NotificationRecord`; re-reconcile → expect **no** second email (dedup);
+- set `UserProfile.spec.preferences.optOutAll: true` → expect suppression;
+- bump a `ServiceProvider` image → expect a single aggregated digest per affected admin.
+
+This full delivery scenario is the next e2e milestone; the current suite is the config smoke test.
+
+## Development
+
+```shell
+go build ./...        # build
+go vet ./...          # vet
+go test ./internal/...  # unit tests (pipeline, dedup keys, controller helpers, template render)
+task test-e2e         # full kind-based e2e
+```
+
+Unit tests cover the delivery pipeline (dedup, opt-out, address resolution, send-failure retry),
+the dedup/profile key derivation, the membership/admin extraction helpers, and golden-ish
+assertions on the rendered email templates (including HTML escaping).
+
+## Roadmap / not yet in scope
+
+- Slack `Notifier`; MJML templates; a self-service opt-out link (needs a small HTTP endpoint).
+- OIDC `email`-claim resolution (today: username-is-email, or a `UserProfile.spec.email` override).
 
 ## Licensing
 
-Copyright OpenControlPlane contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/openmcp-project/platform-service-template).
-
----
-
-<p align="center">
-  <a href="https://apeirora.eu/content/projects/">
-    <img alt="BMWK-EU funding logo" src="https://apeirora.eu/assets/img/BMWK-EU.png" width="300"/>
-  </a>
-</p>
-
-<p align="center">
-  OpenControlPlane is part of <a href="https://apeirora.eu/content/projects/">ApeiroRA</a>, an EU Important Project of Common European Interest (IPCEI-CIS).
-</p>
-
-<p align="center">
-  Copyright Linux Foundation Europe. For web site terms of use, trademark policy and other project policies please see <a href="https://linuxfoundation.eu/en/policies">https://linuxfoundation.eu/en/policies</a>.
-</p>
+Copyright the Open Control Plane contributors. See [LICENSE](LICENSE) and the REUSE metadata.

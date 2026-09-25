@@ -14,7 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-//go:generate opencontrolplane-gen
 package v1alpha1
 
 import (
@@ -23,76 +22,91 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
+// UserProfileSpec defines the desired state of a platform user's notification profile.
+// It doubles as the platform user registry (one per distinct identity), the email
+// resolution source, and the opt-out store.
+type UserProfileSpec struct {
+	// Subject is the identity this profile belongs to.
+	Subject Subject `json:"subject"`
 
-// opencontrolplane-gen:replace Foo=KIND
-// FooSpec defines the desired state of Foo
-// opencontrolplane-gen:replace Foo=KIND
-type FooSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "task generate" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// opencontrolplane-gen:replace Foo=KIND
-	// foo is an example field of Foo. Edit api_types.go to remove/update
+	// Email overrides the address used for email delivery. When empty, the address is
+	// resolved from the subject (see NotificationConfig.spec.usernameIsEmail).
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Email string `json:"email,omitempty"`
+
+	// Preferences captures the user's opt-out and channel choices.
+	// +optional
+	Preferences NotificationPreferences `json:"preferences,omitempty"`
 }
 
-// opencontrolplane-gen:replace Foo=KIND
-// FooStatus defines the observed state of Foo
-// opencontrolplane-gen:replace Foo=KIND
-type FooStatus struct {
+// NotificationPreferences captures per-user opt-out and channel selection.
+type NotificationPreferences struct {
+	// OptOutAll disables all notifications for this user.
+	// +optional
+	OptOutAll bool `json:"optOutAll,omitempty"`
+
+	// OptOutCategories disables specific categories for this user.
+	// +optional
+	OptOutCategories []Category `json:"optOutCategories,omitempty"`
+
+	// Channels selects preferred delivery channels. When empty, the config default is used.
+	// +optional
+	Channels []Channel `json:"channels,omitempty"`
+}
+
+// UserProfileStatus defines the observed state of UserProfile.
+type UserProfileStatus struct {
 	commonapi.Status `json:",inline"`
+
+	// FirstSeen is when this identity was first observed on the platform.
+	// +optional
+	FirstSeen *metav1.Time `json:"firstSeen,omitempty"`
+
+	// ResolvedEmail is the address the controller resolved for this user.
+	// +optional
+	ResolvedEmail string `json:"resolvedEmail,omitempty"`
+
+	// EnablementSentAt records when the one-time enablement email was sent.
+	// +optional
+	EnablementSentAt *metav1.Time `json:"enablementSentAt,omitempty"`
 }
 
-// opencontrolplane-gen:replace Foo=KIND
-// Foo is the Schema for the Foo API
+// UserProfile is the Schema for the UserProfile API.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:printcolumn:JSONPath=`.status.phase`,name="Phase",type=string
+// +kubebuilder:resource:scope=Cluster,shortName=uprof
+// +kubebuilder:printcolumn:name="Subject",type=string,JSONPath=`.spec.subject.name`
+// +kubebuilder:printcolumn:name="Email",type=string,JSONPath=`.status.resolvedEmail`
 // +kubebuilder:printcolumn:name="Age",type="date",JSONPath=".metadata.creationTimestamp"
-// opencontrolplane-gen:replace onboarding=WATCH
-// +kubebuilder:metadata:labels="openmcp.cloud/cluster=onboarding"
-// opencontrolplane-gen:replace Foo=KIND
-type Foo struct {
+// +kubebuilder:metadata:labels="openmcp.cloud/cluster=platform"
+type UserProfile struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty,omitzero"`
 
-	// opencontrolplane-gen:replace Foo=KIND
-	// spec defines the desired state of Foo
+	// spec defines the desired state of UserProfile
 	// +required
-	// opencontrolplane-gen:replace Foo=KIND
-	Spec FooSpec `json:"spec"`
+	Spec UserProfileSpec `json:"spec"`
 
-	// opencontrolplane-gen:replace Foo=KIND
-	// status defines the observed state of Foo
+	// status defines the observed state of UserProfile
 	// +optional
-	// opencontrolplane-gen:replace Foo=KIND
-	Status FooStatus `json:"status,omitempty,omitzero"`
+	Status UserProfileStatus `json:"status,omitempty,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// opencontrolplane-gen:replace Foo=KIND
-// FooList contains a list of Foo
-// opencontrolplane-gen:replace Foo=KIND
-type FooList struct {
+// UserProfileList contains a list of UserProfile
+type UserProfileList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	// opencontrolplane-gen:replace Foo=KIND
-	Items []Foo `json:"items"`
+	Items           []UserProfile `json:"items"`
 }
 
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
-		// opencontrolplane-gen:replace Foo=KIND
-		s.AddKnownTypes(GroupVersion, &Foo{}, &FooList{})
+		s.AddKnownTypes(GroupVersion, &UserProfile{}, &UserProfileList{})
 		return nil
 	})
 }
