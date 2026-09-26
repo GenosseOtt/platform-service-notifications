@@ -203,7 +203,7 @@ func TestControlPlaneMembers(t *testing.T) {
 	if len(members) != 1 {
 		t.Fatalf("expected 1 deduped member, got %d: %+v", len(members), members)
 	}
-	if members[0].role != "admin" {
+	if members[0].role != roleAdmin {
 		t.Errorf("expected role to upgrade to admin, got %q", members[0].role)
 	}
 }

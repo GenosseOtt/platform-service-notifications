@@ -24,7 +24,7 @@ func TestDeliver_HappyPath(t *testing.T) {
 	if len(n.sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(n.sent))
 	}
-	if n.sent[0].To != "alice@example.com" || n.sent[0].Subject != "subj" || n.sent[0].HTML != fakeRenderedHTML || n.sent[0].Text != "hi" {
+	if n.sent[0].To != "alice@example.com" || n.sent[0].Subject != fakeRenderedSubject || n.sent[0].HTML != fakeRenderedHTML || n.sent[0].Text != "hi" {
 		t.Fatalf("message not assembled as expected: %+v", n.sent[0])
 	}
 	if s.delivered != 1 {

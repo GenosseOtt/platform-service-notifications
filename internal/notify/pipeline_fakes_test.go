@@ -9,7 +9,10 @@ import (
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
-const fakeRenderedHTML = "<b>hi</b>"
+const (
+	fakeRenderedHTML    = "<b>hi</b>"
+	fakeRenderedSubject = "subj"
+)
 
 // --- fakes ---
 
@@ -93,12 +96,12 @@ func defaultSettings() Settings {
 }
 
 func newTestPipeline(s store.Store, n Notifier, set Settings) *Pipeline {
-	r := &fakeRenderer{out: Rendered{Subject: "subj", HTML: fakeRenderedHTML, Text: "hi"}}
+	r := &fakeRenderer{out: Rendered{Subject: fakeRenderedSubject, HTML: fakeRenderedHTML, Text: "hi"}}
 	return NewPipeline(s, r, set, nil, n)
 }
 
 func newTestPipelineWithSuppressor(s store.Store, n Notifier, set Settings, sup optout.Suppressor) *Pipeline {
-	r := &fakeRenderer{out: Rendered{Subject: "subj", HTML: fakeRenderedHTML, Text: "hi"}}
+	r := &fakeRenderer{out: Rendered{Subject: fakeRenderedSubject, HTML: fakeRenderedHTML, Text: "hi"}}
 	return NewPipeline(s, r, set, sup, n)
 }
 

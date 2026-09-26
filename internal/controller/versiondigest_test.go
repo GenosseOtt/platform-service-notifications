@@ -121,6 +121,8 @@ func (f *digestSuppressor) Suppressed(_ context.Context, recipient v1alpha1.Subj
 // ─── builder helpers ─────────────────────────────────────────────────────────
 
 // digestCP creates a ControlPlane with all given addresses as admins.
+//
+//nolint:unparam // ns always testCPNS in current tests but the helper is deliberately general
 func digestCP(name, ns string, adminEmails ...string) *cpv2alpha1.ControlPlane {
 	subjects := make([]rbacv1.Subject, 0, len(adminEmails))
 	for _, e := range adminEmails {
@@ -146,6 +148,8 @@ func digestSP(name, image string, gvk metav1.GroupVersionKind) *providerv1alpha1
 }
 
 // digestSvcInst creates an unstructured service instance whose (name, ns) matches its ControlPlane.
+//
+//nolint:unparam // ns always testCPNS in current tests but the helper is deliberately general
 func digestSvcInst(group, version, kind, name, ns string) *unstructured.Unstructured {
 	obj := &unstructured.Unstructured{}
 	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: group, Version: version, Kind: kind})

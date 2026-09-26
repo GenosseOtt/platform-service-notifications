@@ -17,6 +17,10 @@ const (
 	kindProject      = "Project"
 	kindWorkspace    = "Workspace"
 	kindControlPlane = "ControlPlane"
+
+	testProject   = "poc"
+	testWorkspace = "dev"
+	testCPName    = "prod"
 )
 
 // scheme registers our v1alpha1 types so the fake client can handle them.
@@ -94,10 +98,10 @@ func TestResolver_NoOptOuts_NotSuppressed(t *testing.T) {
 // --- NotificationOptOut cascade tests ---
 
 func TestResolver_ProjectOptOut_SuppressesProjectEvent(t *testing.T) {
-	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
-	sup, reason, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, projectScope("poc"))
+	sup, reason, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, projectScope(testProject))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,10 +115,10 @@ func TestResolver_ProjectOptOut_SuppressesProjectEvent(t *testing.T) {
 
 func TestResolver_ProjectOptOut_CascadesToWorkspaceEvent(t *testing.T) {
 	// A project-level opt-out should suppress workspace-scope events in the same project.
-	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "dev"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, testWorkspace))
 	if err != nil || !sup {
 		t.Fatalf("expected project opt-out to cascade to workspace event: suppressed=%v err=%v", sup, err)
 	}
@@ -122,17 +126,17 @@ func TestResolver_ProjectOptOut_CascadesToWorkspaceEvent(t *testing.T) {
 
 func TestResolver_ProjectOptOut_CascadesToCPEvent(t *testing.T) {
 	// A project-level opt-out should suppress CP-scope events in the same project.
-	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope("poc", "dev", "cp-1"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope(testProject, testWorkspace, "cp-1"))
 	if err != nil || !sup {
 		t.Fatalf("expected project opt-out to cascade to CP event: suppressed=%v err=%v", sup, err)
 	}
 }
 
 func TestResolver_ProjectOptOut_DoesNotAffectOtherProject(t *testing.T) {
-	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
 	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, projectScope("other-project"))
@@ -143,10 +147,10 @@ func TestResolver_ProjectOptOut_DoesNotAffectOtherProject(t *testing.T) {
 
 func TestResolver_WorkspaceOptOut_SuppressesWorkspaceEvent(t *testing.T) {
 	// Workspace opt-out in the project namespace suppresses events for that workspace.
-	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: "dev"})
+	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: testWorkspace})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "dev"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, testWorkspace))
 	if err != nil || !sup {
 		t.Fatalf("expected workspace opt-out to suppress workspace event: suppressed=%v err=%v", sup, err)
 	}
@@ -154,10 +158,10 @@ func TestResolver_WorkspaceOptOut_SuppressesWorkspaceEvent(t *testing.T) {
 
 func TestResolver_WorkspaceOptOut_CascadesToCPEvent(t *testing.T) {
 	// A workspace-level opt-out should cascade to CP events in that workspace.
-	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: "dev"})
+	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: testWorkspace})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope("poc", "dev", "cp-1"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope(testProject, testWorkspace, "cp-1"))
 	if err != nil || !sup {
 		t.Fatalf("expected workspace opt-out to cascade to CP event: suppressed=%v err=%v", sup, err)
 	}
@@ -165,10 +169,10 @@ func TestResolver_WorkspaceOptOut_CascadesToCPEvent(t *testing.T) {
 
 func TestResolver_WorkspaceOptOut_DoesNotAffectSiblingWorkspace(t *testing.T) {
 	// A workspace opt-out for "dev" must not suppress events in "staging".
-	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: "dev"})
+	obj := makeOptOut("mute-ws", "project-poc", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: testWorkspace})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "staging"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, "staging"))
 	if err != nil || sup {
 		t.Fatalf("opt-out for 'dev' must not affect 'staging': suppressed=%v err=%v", sup, err)
 	}
@@ -176,10 +180,10 @@ func TestResolver_WorkspaceOptOut_DoesNotAffectSiblingWorkspace(t *testing.T) {
 
 func TestResolver_CPOptOut_SuppressesCPEvent(t *testing.T) {
 	// A CP-level opt-out placed in the workspace namespace suppresses that specific CP.
-	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: "prod"})
+	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: testCPName})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope("poc", "dev", "prod"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope(testProject, testWorkspace, testCPName))
 	if err != nil || !sup {
 		t.Fatalf("expected CP opt-out to suppress CP event: suppressed=%v err=%v", sup, err)
 	}
@@ -187,10 +191,10 @@ func TestResolver_CPOptOut_SuppressesCPEvent(t *testing.T) {
 
 func TestResolver_CPOptOut_DoesNotAffectSiblingCP(t *testing.T) {
 	// A CP opt-out for "prod" must not suppress events for "staging" in the same workspace.
-	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: "prod"})
+	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: testCPName})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope("poc", "dev", "staging"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, cpScope(testProject, testWorkspace, "staging"))
 	if err != nil || sup {
 		t.Fatalf("opt-out for 'prod' must not affect 'staging': suppressed=%v err=%v", sup, err)
 	}
@@ -198,11 +202,11 @@ func TestResolver_CPOptOut_DoesNotAffectSiblingCP(t *testing.T) {
 
 func TestResolver_CPOptOut_DoesNotCascadeUp(t *testing.T) {
 	// A CP-level opt-out must NOT suppress project- or workspace-scope events.
-	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: "prod"})
+	obj := makeOptOut("mute-cp", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindControlPlane, Name: testCPName})
 	r := newResolver(obj)
 
 	// Workspace-scope event must not be affected.
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "dev"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, testWorkspace))
 	if err != nil || sup {
 		t.Fatalf("CP opt-out must not cascade up to workspace event: suppressed=%v err=%v", sup, err)
 	}
@@ -212,11 +216,11 @@ func TestResolver_CPOptOut_DoesNotCascadeUp(t *testing.T) {
 
 func TestResolver_CategorySubset_Match(t *testing.T) {
 	obj := makeOptOut("mute-cat", "project-poc",
-		v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"},
+		v1alpha1.ResourceRef{Kind: kindProject, Name: testProject},
 		v1alpha1.CategoryNewServiceVersion)
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, projectScope("poc"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryNewServiceVersion, projectScope(testProject))
 	if err != nil || !sup {
 		t.Fatalf("expected suppressed for matching category: suppressed=%v err=%v", sup, err)
 	}
@@ -225,11 +229,11 @@ func TestResolver_CategorySubset_Match(t *testing.T) {
 func TestResolver_CategorySubset_NoMatch(t *testing.T) {
 	// Opt-out specifies NewServiceVersion; event is MembershipAdded → not suppressed.
 	obj := makeOptOut("mute-cat", "project-poc",
-		v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"},
+		v1alpha1.ResourceRef{Kind: kindProject, Name: testProject},
 		v1alpha1.CategoryNewServiceVersion)
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, projectScope("poc"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, projectScope(testProject))
 	if err != nil || sup {
 		t.Fatalf("opt-out for NewServiceVersion must not suppress MembershipAdded: suppressed=%v err=%v", sup, err)
 	}
@@ -237,11 +241,11 @@ func TestResolver_CategorySubset_NoMatch(t *testing.T) {
 
 func TestResolver_EmptyCategories_SuppressesAll(t *testing.T) {
 	// No categories = mute all.
-	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeOptOut("mute-all", "project-poc", v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
 	for _, cat := range []v1alpha1.Category{v1alpha1.CategoryMembershipAdded, v1alpha1.CategoryNewServiceVersion, v1alpha1.CategoryUserEnablement} {
-		sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), cat, projectScope("poc"))
+		sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), cat, projectScope(testProject))
 		if err != nil || !sup {
 			t.Fatalf("empty-categories opt-out must suppress %q: suppressed=%v err=%v", cat, sup, err)
 		}
@@ -252,17 +256,17 @@ func TestResolver_EmptyCategories_SuppressesAll(t *testing.T) {
 
 func TestResolver_UserOptOut_SubjectMatch(t *testing.T) {
 	alice := userSubject("alice")
-	obj := makeUserOptOut("alice-mute", "project-poc", alice, v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeUserOptOut("alice-mute", "project-poc", alice, v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
 	// Alice is suppressed.
-	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, projectScope("poc"))
+	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, projectScope(testProject))
 	if err != nil || !sup {
 		t.Fatalf("alice's opt-out should suppress alice: suppressed=%v err=%v", sup, err)
 	}
 
 	// Bob is not suppressed.
-	sup, _, err = r.Suppressed(context.Background(), userSubject("bob"), v1alpha1.CategoryMembershipAdded, projectScope("poc"))
+	sup, _, err = r.Suppressed(context.Background(), userSubject("bob"), v1alpha1.CategoryMembershipAdded, projectScope(testProject))
 	if err != nil || sup {
 		t.Fatalf("alice's opt-out must not suppress bob: suppressed=%v err=%v", sup, err)
 	}
@@ -271,10 +275,10 @@ func TestResolver_UserOptOut_SubjectMatch(t *testing.T) {
 func TestResolver_UserOptOut_WorkspaceNamespace(t *testing.T) {
 	// A user opt-out placed in the workspace namespace is found when the event scope includes that workspace.
 	alice := userSubject("alice")
-	obj := makeUserOptOut("alice-mute", "project-poc--ws-dev", alice, v1alpha1.ResourceRef{Kind: kindWorkspace, Name: "dev"})
+	obj := makeUserOptOut("alice-mute", "project-poc--ws-dev", alice, v1alpha1.ResourceRef{Kind: kindWorkspace, Name: testWorkspace})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "dev"))
+	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, testWorkspace))
 	if err != nil || !sup {
 		t.Fatalf("user opt-out in ws namespace should be found: suppressed=%v err=%v", sup, err)
 	}
@@ -283,18 +287,18 @@ func TestResolver_UserOptOut_WorkspaceNamespace(t *testing.T) {
 func TestResolver_UserOptOut_CategorySubset(t *testing.T) {
 	alice := userSubject("alice")
 	obj := makeUserOptOut("alice-mute", "project-poc", alice,
-		v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"},
+		v1alpha1.ResourceRef{Kind: kindProject, Name: testProject},
 		v1alpha1.CategoryNewServiceVersion)
 	r := newResolver(obj)
 
 	// NewServiceVersion is suppressed for alice.
-	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryNewServiceVersion, projectScope("poc"))
+	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryNewServiceVersion, projectScope(testProject))
 	if err != nil || !sup {
 		t.Fatalf("expected suppressed for matching category: suppressed=%v err=%v", sup, err)
 	}
 
 	// MembershipAdded is NOT suppressed.
-	sup, _, err = r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, projectScope("poc"))
+	sup, _, err = r.Suppressed(context.Background(), alice, v1alpha1.CategoryMembershipAdded, projectScope(testProject))
 	if err != nil || sup {
 		t.Fatalf("user opt-out category must not suppress other categories: suppressed=%v err=%v", sup, err)
 	}
@@ -303,10 +307,10 @@ func TestResolver_UserOptOut_CategorySubset(t *testing.T) {
 func TestResolver_UserOptOut_CascadeToCP(t *testing.T) {
 	// A project-level user opt-out should cascade to CP-scope events.
 	alice := userSubject("alice")
-	obj := makeUserOptOut("alice-mute", "project-poc", alice, v1alpha1.ResourceRef{Kind: kindProject, Name: "poc"})
+	obj := makeUserOptOut("alice-mute", "project-poc", alice, v1alpha1.ResourceRef{Kind: kindProject, Name: testProject})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryNewServiceVersion, cpScope("poc", "dev", "cp-1"))
+	sup, _, err := r.Suppressed(context.Background(), alice, v1alpha1.CategoryNewServiceVersion, cpScope(testProject, testWorkspace, "cp-1"))
 	if err != nil || !sup {
 		t.Fatalf("user project-opt-out should cascade to CP events: suppressed=%v err=%v", sup, err)
 	}
@@ -316,10 +320,10 @@ func TestResolver_UserOptOut_CascadeToCP(t *testing.T) {
 
 func TestResolver_WorkspaceIsolation_OptOutInOneWorkspaceDoesNotAffectOther(t *testing.T) {
 	// An opt-out placed in project-poc--ws-dev should not suppress events in project-poc--ws-staging.
-	obj := makeOptOut("mute-all", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: "dev"})
+	obj := makeOptOut("mute-all", "project-poc--ws-dev", v1alpha1.ResourceRef{Kind: kindWorkspace, Name: testWorkspace})
 	r := newResolver(obj)
 
-	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope("poc", "staging"))
+	sup, _, err := r.Suppressed(context.Background(), userSubject("alice"), v1alpha1.CategoryMembershipAdded, workspaceScope(testProject, "staging"))
 	if err != nil || sup {
 		t.Fatalf("opt-out in ws/dev namespace must not affect staging workspace: suppressed=%v err=%v", sup, err)
 	}
