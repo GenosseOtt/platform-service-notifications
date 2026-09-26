@@ -20,6 +20,7 @@ import (
 
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 	"github.com/openmcp-project/platform-service-notifications/internal/notify"
+	"github.com/openmcp-project/platform-service-notifications/internal/optout"
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
@@ -57,6 +58,7 @@ func (h *membershipHandler) process(ctx context.Context, kind, namespace, name, 
 			Recipient: m.subject,
 			// Keyed on (resource, subject): the recipient is notified once when first added.
 			EventKey: strings.Join([]string{"membership", kind, namespace + "/" + name, subjectID(m.subject)}, ":"),
+			Scope:    scopeFor(kind, namespace, name),
 			Data: notify.MembershipAddedData{
 				ProductName:         h.pipeline.ProductName(),
 				RecipientName:       m.subject.Name,
@@ -88,6 +90,21 @@ func primaryRole(roles []string) string {
 		return roles[0]
 	}
 	return ""
+}
+
+// scopeFor derives the opt-out Scope for a membership event from the resource kind, its
+// namespace (from which project/workspace are recovered), and its name.
+func scopeFor(kind, namespace, name string) optout.Scope {
+	switch kind {
+	case "Project":
+		return optout.Scope{Project: name}
+	case "Workspace":
+		return optout.Scope{Project: projectFromNamespace(namespace), Workspace: name}
+	case "ControlPlane":
+		project, workspace := projectWorkspaceFromNamespace(namespace)
+		return optout.Scope{Project: project, Workspace: workspace, ControlPlane: name}
+	}
+	return optout.Scope{}
 }
 
 // consoleLink builds a deep link into the platform UI (a hash-router SPA) for a resource.

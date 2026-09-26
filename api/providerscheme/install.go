@@ -36,11 +36,13 @@ func InstallOperatorAPIsPlatform(scheme *runtime.Scheme) *runtime.Scheme {
 }
 
 // InstallOperatorAPIsOnboarding builds the scheme for the onboarding cluster, where the
-// membership signals live: Projects/Workspaces and V2 ControlPlanes.
+// membership signals live: Projects/Workspaces and V2 ControlPlanes. Also registers our own
+// opt-out CRDs (NotificationOptOut, UserNotificationOptOut) which live on the onboarding cluster.
 func InstallOperatorAPIsOnboarding(scheme *runtime.Scheme) *runtime.Scheme {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(pwv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(cpv2alpha1.AddToScheme(scheme))
+	utilruntime.Must(v1alpha1.AddToScheme(scheme))
 
 	return scheme
 }

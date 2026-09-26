@@ -18,7 +18,8 @@ Two guarantees underpin all of this:
 
 - **No double-notifications.** Every notification is recorded; a user is never told about the
   same event twice, even across restarts, retries, or repeated reconciles.
-- **Opt-out is always honored.** A user can disable all notifications or specific categories.
+- **Opt-out is always honored.** Project/workspace admins can mute resources; any member can
+  silence their own notifications — all managed via CRDs on the onboarding cluster.
 
 ## What it notifies about
 
@@ -34,15 +35,15 @@ Two guarantees underpin all of this:
               PLATFORM cluster                         ONBOARDING cluster
   ┌───────────────────────────────────┐   ┌────────────────────────────────────┐
   │ NotificationConfig (singleton)     │   │ Project / Workspace / ControlPlane  │
-  │ UserProfile   (registry + opt-out) │   │ ServiceProvider resources map to    │
-  │ NotificationRecord (dedup ledger)  │   │ per-ControlPlane service instances  │
-  │ ServiceProvider (version source)   │   └────────────────────────────────────┘
-  └───────────────────────────────────┘                    ▲
+  │ UserProfile   (email + registry)   │   │ ServiceProvider resources           │
+  │ NotificationRecord (dedup ledger)  │   │ NotificationOptOut     (admin)      │
+  │ ServiceProvider (version source)   │   │ UserNotificationOptOut (self-serve) │
+  └───────────────────────────────────┘   └────────────────────────────────────┘
                  ▲     reconcilers watch  ─────────────────┘
                  │
      ┌───────────┴───────────────────────────────┐
-     │ pipeline: dedup → render → send → record   │
-     │ Notifier: Email (SMTP, go-mail)  [Slack later] │
+     │ pipeline: suppress → dedup → render → send │
+     │ Notifier: Email (SMTP, go-mail) [Slack …]  │
      └────────────────────────────────────────────┘
 ```
 
@@ -121,7 +122,13 @@ settings without a restart, and the object reports a `Ready` condition once appl
 > **No `email` block?** The config still reaches `Ready`, but email delivery is inert until SMTP
 > is configured. This is the smoke-test path exercised by the e2e suite.
 
-### 3. Deploy via `PlatformService`
+### 3. Grant opt-out RBAC on the onboarding cluster
+
+Apply the `ProjectWorkspaceConfig` described in
+[docs/optout-rbac.md](docs/optout-rbac.md) once per platform deployment. This grants project and
+workspace members the ability to create opt-out objects in their namespace.
+
+### 4. Deploy via `PlatformService`
 
 ```yaml
 apiVersion: openmcp.cloud/v1alpha1
@@ -138,25 +145,61 @@ The `init` job requests **read-only** (`get;list;watch`) access on the onboardin
 `projects`, `workspaces`, `controlplanes`, and (currently, broadly) other resources so it can
 resolve the dynamically-typed service instances back to their ControlPlanes.
 
-### Per-user opt-out
+### Opt-out
 
-Users (or an admin on their behalf) control delivery through their `UserProfile` on the platform
-cluster:
+Opt-out is self-service, driven by two CRDs on the **onboarding** cluster (where end users have
+RBAC access). The namespace where the object lives determines its authorization scope; the
+`spec.target` field makes the muted resource explicit.
+
+**`NotificationOptOut`** — resource-wide, admin-managed. Mutes notifications for *all* recipients
+on the targeted resource:
 
 ```yaml
+# Mute all notifications for everyone in project "poc" (cascades to its workspaces/CPs).
+# Created by a project admin in namespace "project-poc".
 apiVersion: notifications.platform.open-control-plane.io/v1alpha1
-kind: UserProfile
+kind: NotificationOptOut
 metadata:
-  name: up-<hash>          # created automatically; matched by spec.subject
+  name: poc-silent
+  namespace: project-poc
+spec:
+  target:
+    kind: Project
+    name: poc
+  # categories: [NewServiceVersion]   # omit to mute everything
+```
+
+**`UserNotificationOptOut`** — per-user self-service. Any member (including viewers) can mute
+notifications for themselves on a specific resource:
+
+```yaml
+# Priya mutes version digests on one specific control plane.
+# Created by priya (or a workspace admin) in namespace "project-poc--ws-dev".
+apiVersion: notifications.platform.open-control-plane.io/v1alpha1
+kind: UserNotificationOptOut
+metadata:
+  name: priya-no-digests-prod
+  namespace: project-poc--ws-dev
 spec:
   subject:
     kind: User
     name: priya@example.com
-  email: priya.work@example.com    # optional override of the resolved address
-  preferences:
-    optOutAll: false
-    optOutCategories: [NewServiceVersion]   # silence just the version digests
+  target:
+    kind: ControlPlane
+    name: prod-cp
+  categories: [NewServiceVersion]
 ```
+
+**Cascade rules:**
+- A `Project` target suppresses events for the project, all its workspaces, and all its control planes.
+- A `Workspace` target suppresses events for that workspace and its control planes.
+- A `ControlPlane` target suppresses only that specific control plane.
+
+The opt-out check runs before dedup, so suppressed notifications are recorded with
+`phase: Suppressed` in the `NotificationRecord` (still counted as delivered for dedup purposes).
+
+See [docs/optout-rbac.md](docs/optout-rbac.md) for the `ProjectWorkspaceConfig` that grants
+the required RBAC and a discussion of known limitations.
 
 ## Trying it in a local `ocpctl` test landscape
 
@@ -185,15 +228,33 @@ harness in [test/e2e/main_test.go](test/e2e/main_test.go), which:
 
 ### Exercising real delivery locally
 
-To watch actual emails, add a **MailHog** SMTP sidecar to the landscape and point the
-`NotificationConfig` at it (`host: mailhog`, `port: 1025`, `startTLS: false`, no `secretRef`), then:
+`task test-e2e-mailhog` spins up the full kind landscape, deploys a
+[MailHog](https://github.com/mailhog/MailHog) SMTP relay into it, pre-wires the
+`NotificationConfig` to send through MailHog, creates a test user, and asserts that the welcome
+email arrives — all with zero manual setup.
 
-- create a `Project` with a new member → expect one email in MailHog **and** a
-  `NotificationRecord`; re-reconcile → expect **no** second email (dedup);
-- set `UserProfile.spec.preferences.optOutAll: true` → expect suppression;
-- bump a `ServiceProvider` image → expect a single aggregated digest per affected admin.
+```shell
+# Run the delivery demo and tear down when done.
+task test-e2e-mailhog
 
-This full delivery scenario is the next e2e milestone; the current suite is the config smoke test.
+# Keep the landscape alive for hands-on exploration (Ctrl-C tears it down).
+KEEP=1 task test-e2e-mailhog
+```
+
+When `KEEP=1` is set the test parks after the delivery assertion and prints the `kind` cluster
+name together with the exact `kubectl port-forward` command to open the MailHog inbox on
+**http://localhost:8025**.
+
+While the landscape is live you can interact freely:
+
+- Create more `UserProfile` objects → each one triggers a welcome email in MailHog.
+- Edit `NotificationConfig` (e.g. set `productName`) → the service hot-reloads within seconds.
+- Create a `UserNotificationOptOut` for a user → subsequent emails are suppressed;
+  check the `NotificationRecord` status (`phase: Suppressed`).
+- Bump a `ServiceProvider` image tag → admins of affected ControlPlanes receive a digest.
+
+This full delivery scenario is the current e2e milestone; the config-smoke suite (`task test-e2e`)
+remains the CI gate.
 
 ## Development
 
@@ -204,9 +265,10 @@ go test ./internal/...  # unit tests (pipeline, dedup keys, controller helpers, 
 task test-e2e         # full kind-based e2e
 ```
 
-Unit tests cover the delivery pipeline (dedup, opt-out, address resolution, send-failure retry),
-the dedup/profile key derivation, the membership/admin extraction helpers, and golden-ish
-assertions on the rendered email templates (including HTML escaping).
+Unit tests cover the delivery pipeline (dedup, suppression, address resolution, send-failure
+retry), the opt-out resolver (cascade rules, category subsets, subject matching, workspace
+isolation), the dedup/profile key derivation, the membership/admin extraction helpers, and
+golden-ish assertions on the rendered email templates (including HTML escaping).
 
 ## Roadmap / not yet in scope
 

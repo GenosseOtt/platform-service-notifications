@@ -17,7 +17,10 @@ import (
 	"github.com/openmcp-project/openmcp-testing/pkg/setup"
 )
 
-var testenv env.Environment
+var (
+	testenv             env.Environment
+	platformClusterName string // captured for the MailHog demo port-forward command
+)
 
 func TestMain(m *testing.M) {
 	initLogging()
@@ -47,7 +50,7 @@ func TestMain(m *testing.M) {
 		},
 	}
 	testenv = env.NewWithConfig(envconf.New().WithNamespace(openmcp.Namespace))
-	openmcp.Bootstrap(testenv)
+	platformClusterName = openmcp.Bootstrap(testenv)
 	os.Exit(testenv.Run(m))
 }
 

@@ -33,6 +33,7 @@ import (
 	"github.com/openmcp-project/platform-service-notifications/internal/controller"
 	"github.com/openmcp-project/platform-service-notifications/internal/notify"
 	"github.com/openmcp-project/platform-service-notifications/internal/notify/email"
+	"github.com/openmcp-project/platform-service-notifications/internal/optout"
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
@@ -239,7 +240,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 					// Membership signals: Projects/Workspaces and V2 ControlPlanes.
 					APIGroups: []string{"core.openmcp.cloud", "core.open-control-plane.io"},
 					Resources: []string{"projects", "workspaces", "controlplanes"},
-					Verbs:     []string{"get", "list", "watch"},
+					Verbs:     []string{"get", "list", "watch"}, //nolint:goconst
 				},
 				{
 					// Service instances mapped from ServiceProvider.status.resources have dynamic
@@ -247,7 +248,15 @@ func (o *RunOptions) Run(ctx context.Context) error {
 					// control planes. TODO: tighten once the set of service GVKs is enumerable.
 					APIGroups: []string{"*"},
 					Resources: []string{"*"},
-					Verbs:     []string{"get", "list", "watch"},
+					Verbs:     []string{"get", "list", "watch"}, //nolint:goconst
+				},
+				{
+					// Opt-out CRDs: read to evaluate suppression during delivery.
+					// The broad wildcard above already covers these; this rule is an explicit
+					// least-privilege declaration for documentation and future tightening.
+					APIGroups: []string{"notifications.platform.open-control-plane.io"},
+					Resources: []string{"notificationoptouts", "usernotificationoptouts"},
+					Verbs:     []string{"get", "list", "watch"}, //nolint:goconst
 				},
 			},
 		},
@@ -300,7 +309,10 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	// The sender starts unconfigured; the ConfigReconciler fills in SMTP settings/credentials
 	// from the NotificationConfig and its referenced Secret.
 	sender := email.NewSender(email.Config{})
-	pipeline := notify.NewPipeline(notifStore, renderer, notify.Settings{}, sender)
+	// The suppressor reads opt-out CRDs from the onboarding cluster via the manager's
+	// cache-backed client (mgr.GetClient()), so List calls are served locally.
+	suppressor := optout.New(mgr.GetClient())
+	pipeline := notify.NewPipeline(notifStore, renderer, notify.Settings{}, suppressor, sender)
 
 	if err := controller.NewConfigReconciler(o.PlatformCluster, pipeline, sender, o.ProviderName, o.ProviderNamespace).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add ConfigReconciler to manager: %w", err)
@@ -317,7 +329,7 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	if err := controller.NewEnablementReconciler(o.PlatformCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add EnablementReconciler to manager: %w", err)
 	}
-	if err := controller.NewVersionDigestReconciler(o.PlatformCluster, onboardingCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
+	if err := controller.NewVersionDigestReconciler(o.PlatformCluster, onboardingCluster, notifStore, pipeline, suppressor, o.ProviderName).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add VersionDigestReconciler to manager: %w", err)
 	}
 

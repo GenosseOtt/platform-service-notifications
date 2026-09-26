@@ -1,0 +1,113 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  labels:
+    openmcp.cloud/cluster: onboarding
+  name: usernotificationoptouts.notifications.platform.open-control-plane.io
+spec:
+  group: notifications.platform.open-control-plane.io
+  names:
+    kind: UserNotificationOptOut
+    listKind: UserNotificationOptOutList
+    plural: usernotificationoptouts
+    shortNames:
+    - usernotifoptout
+    singular: usernotificationoptout
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          UserNotificationOptOut is a per-user opt-out creatable by any project or workspace member.
+          It mutes notifications for the named subject on the targeted resource. For resource-wide
+          muting (affecting all recipients) see NotificationOptOut.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines whom to mute and on what resource
+            properties:
+              categories:
+                description: Categories lists the notification categories to mute.
+                  When empty, all categories are muted.
+                items:
+                  description: Category is the type of activity a notification is
+                    about.
+                  enum:
+                  - MembershipAdded
+                  - UserEnablement
+                  - NewServiceVersion
+                  type: string
+                type: array
+              subject:
+                description: |-
+                  Subject is the user whose notifications are muted. Any project/workspace member may create
+                  this object; the "only silence yourself" restriction is a soft convention (no admission
+                  webhook is available on the onboarding cluster).
+                properties:
+                  kind:
+                    description: Kind is the kind of the subject.
+                    enum:
+                    - User
+                    - Group
+                    - ServiceAccount
+                    type: string
+                  name:
+                    description: Name is the identity string. For Kind=User this is
+                      the OIDC username (an email in practice).
+                    type: string
+                  namespace:
+                    description: Namespace is only required for Kind=ServiceAccount.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+              target:
+                description: |-
+                  Target identifies the specific resource whose notifications are muted for the subject.
+                  Cascade applies: a Project target suppresses Workspace and ControlPlane events for the user.
+                properties:
+                  kind:
+                    description: 'Kind is the resource kind: Project, Workspace, or
+                      ControlPlane.'
+                    enum:
+                    - Project
+                    - Workspace
+                    - ControlPlane
+                    type: string
+                  name:
+                    description: Name is the resource name.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+            required:
+            - subject
+            - target
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true

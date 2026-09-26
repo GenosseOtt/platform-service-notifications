@@ -11,6 +11,13 @@ import (
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 )
 
+const (
+	roleAdmin       = "admin"
+	roleView        = "view"
+	kindClusterRole = "ClusterRole"
+	testBaseURL     = "https://mycompany.eu"
+)
+
 func TestSubjectKind(t *testing.T) {
 	cases := map[string]v1alpha1.SubjectKind{
 		"User":           v1alpha1.SubjectKindUser,
@@ -46,8 +53,8 @@ func TestNotifiableSubject(t *testing.T) {
 }
 
 func TestIsAdminRole(t *testing.T) {
-	admin := []string{"admin", "Admin", "cluster-admin", "project:admin", "CLUSTER-ADMIN"}
-	notAdmin := []string{"view", "viewer", "edit", "", "administrator-ish"}
+	admin := []string{roleAdmin, "Admin", "cluster-admin", "project:admin", "CLUSTER-ADMIN"}
+	notAdmin := []string{roleView, "viewer", "edit", "", "administrator-ish"}
 	for _, r := range admin {
 		if !isAdminRole(r) {
 			t.Errorf("isAdminRole(%q) = false, want true", r)
@@ -61,10 +68,10 @@ func TestIsAdminRole(t *testing.T) {
 }
 
 func TestPrimaryRole(t *testing.T) {
-	if got := primaryRole([]string{"view", "admin"}); got != "admin" {
+	if got := primaryRole([]string{roleView, roleAdmin}); got != roleAdmin {
 		t.Errorf("primaryRole should prefer admin, got %q", got)
 	}
-	if got := primaryRole([]string{"view", "edit"}); got != "view" {
+	if got := primaryRole([]string{roleView, "edit"}); got != roleView {
 		t.Errorf("primaryRole with no admin should return first, got %q", got)
 	}
 	if got := primaryRole(nil); got != "" {
@@ -80,12 +87,12 @@ func TestConsoleLink(t *testing.T) {
 		want              string
 	}{
 		{"empty base", "", "Project", "", "p", ""},
-		{"project", "https://mycompany.eu/", "Project", "", "poc-demo-world", "https://mycompany.eu/#/projects/poc-demo-world"},
-		{"workspace", "https://mycompany.eu", "Workspace", "project-argo-meets-co", "intro-session", "https://mycompany.eu/#/projects/argo-meets-co/workspaces/intro-session"},
-		{"controlplane", "https://mycompany.eu", "ControlPlane", "project-argo-meets-co--ws-intro-session", "democp", "https://mycompany.eu/#/projects/argo-meets-co/workspaces/intro-session/controlplane/democp"},
-		{"workspace bad ns", "https://mycompany.eu", "Workspace", "not-a-project-ns", "w", ""},
-		{"controlplane bad ns", "https://mycompany.eu", "ControlPlane", "project-p", "cp", ""},
-		{"unknown kind", "https://mycompany.eu", "Widget", "ns", "n", ""},
+		{"project", testBaseURL + "/", "Project", "", "poc-demo-world", testBaseURL + "/#/projects/poc-demo-world"},
+		{"workspace", testBaseURL, "Workspace", "project-argo-meets-co", "intro-session", testBaseURL + "/#/projects/argo-meets-co/workspaces/intro-session"},
+		{"controlplane", testBaseURL, "ControlPlane", "project-argo-meets-co--ws-intro-session", "democp", testBaseURL + "/#/projects/argo-meets-co/workspaces/intro-session/controlplane/democp"},
+		{"workspace bad ns", testBaseURL, "Workspace", "not-a-project-ns", "w", ""},
+		{"controlplane bad ns", testBaseURL, "ControlPlane", "project-p", "cp", ""},
+		{"unknown kind", testBaseURL, "Widget", "ns", "n", ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,15 +157,15 @@ func TestControlPlaneAdmins(t *testing.T) {
 	cp := cpWithBindings(
 		commonapi.RoleBindings{
 			Subjects: []rbacv1.Subject{user("admin1@x.io"), user("admin2@x.io")},
-			RoleRefs: []commonapi.RoleRef{{Name: "admin", Kind: "ClusterRole"}},
+			RoleRefs: []commonapi.RoleRef{{Name: roleAdmin, Kind: kindClusterRole}},
 		},
 		commonapi.RoleBindings{
 			Subjects: []rbacv1.Subject{user("viewer@x.io")},
-			RoleRefs: []commonapi.RoleRef{{Name: "view", Kind: "ClusterRole"}},
+			RoleRefs: []commonapi.RoleRef{{Name: roleView, Kind: kindClusterRole}},
 		},
 		commonapi.RoleBindings{ // duplicate admin1 across bindings must dedup
 			Subjects: []rbacv1.Subject{user("admin1@x.io")},
-			RoleRefs: []commonapi.RoleRef{{Name: "cluster-admin", Kind: "ClusterRole"}},
+			RoleRefs: []commonapi.RoleRef{{Name: "cluster-admin", Kind: kindClusterRole}},
 		},
 	)
 	admins := controlPlaneAdmins(cp)
@@ -185,11 +192,11 @@ func TestControlPlaneMembers(t *testing.T) {
 	cp := cpWithBindings(
 		commonapi.RoleBindings{
 			Subjects: []rbacv1.Subject{user("u@x.io")},
-			RoleRefs: []commonapi.RoleRef{{Name: "view", Kind: "ClusterRole"}},
+			RoleRefs: []commonapi.RoleRef{{Name: roleView, Kind: kindClusterRole}},
 		},
 		commonapi.RoleBindings{ // same subject later gains admin -> role should upgrade
 			Subjects: []rbacv1.Subject{user("u@x.io")},
-			RoleRefs: []commonapi.RoleRef{{Name: "admin", Kind: "ClusterRole"}},
+			RoleRefs: []commonapi.RoleRef{{Name: roleAdmin, Kind: kindClusterRole}},
 		},
 	)
 	members := controlPlaneMembers(cp)

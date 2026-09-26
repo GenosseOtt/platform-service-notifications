@@ -1,0 +1,94 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  labels:
+    openmcp.cloud/cluster: onboarding
+  name: notificationoptouts.notifications.platform.open-control-plane.io
+spec:
+  group: notifications.platform.open-control-plane.io
+  names:
+    kind: NotificationOptOut
+    listKind: NotificationOptOutList
+    plural: notificationoptouts
+    shortNames:
+    - notifoptout
+    singular: notificationoptout
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NotificationOptOut is a resource-wide opt-out managed by project/workspace admins. It mutes
+          the targeted resource's notifications for all recipients. For per-user muting see
+          UserNotificationOptOut.
+
+          The namespace determines the authorization scope: project admins place opt-outs in
+          project-<p>; workspace admins place them in project-<p>--ws-<w>. Cascade: a Project-targeted
+          opt-out suppresses notifications for all workspaces and control planes underneath.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines what to mute
+            properties:
+              categories:
+                description: Categories lists the notification categories to mute.
+                  When empty, all categories are muted.
+                items:
+                  description: Category is the type of activity a notification is
+                    about.
+                  enum:
+                  - MembershipAdded
+                  - UserEnablement
+                  - NewServiceVersion
+                  type: string
+                type: array
+              target:
+                description: |-
+                  Target identifies the specific resource whose notifications are muted. When the target
+                  kind is higher in the hierarchy than the event's scope, the opt-out cascades down:
+                  a Project opt-out suppresses Workspace and ControlPlane events; a Workspace opt-out
+                  suppresses ControlPlane events within that workspace.
+                properties:
+                  kind:
+                    description: 'Kind is the resource kind: Project, Workspace, or
+                      ControlPlane.'
+                    enum:
+                    - Project
+                    - Workspace
+                    - ControlPlane
+                    type: string
+                  name:
+                    description: Name is the resource name.
+                    type: string
+                required:
+                - kind
+                - name
+                type: object
+            required:
+            - target
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true

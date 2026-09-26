@@ -35,3 +35,9 @@ tasks:
     cmds:
       - task: build:img:build-test
       - go test -v ./test/e2e/... -count=1
+
+  test-e2e-mailhog:
+    desc: "Build image and run the MailHog delivery demo. KEEP=1 keeps the landscape alive for manual exploration."
+    cmds:
+      - task: build:img:build-test
+      - go test -v -tags e2e_mailhog ./test/e2e/... -run TestMailHog -count=1 -timeout 30m

@@ -11,7 +11,7 @@ import (
 func TestDeliver_HappyPath(t *testing.T) {
 	s := newFakeStore()
 	n := &fakeNotifier{}
-	p, _ := newTestPipeline(s, n, defaultSettings())
+	p := newTestPipeline(s, n, defaultSettings())
 
 	ev := Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("alice@example.com"), EventKey: "k1"}
 	results, err := p.Deliver(context.Background(), ev)
@@ -24,7 +24,7 @@ func TestDeliver_HappyPath(t *testing.T) {
 	if len(n.sent) != 1 {
 		t.Fatalf("expected 1 sent message, got %d", len(n.sent))
 	}
-	if n.sent[0].To != "alice@example.com" || n.sent[0].Subject != "subj" || n.sent[0].HTML != "<b>hi</b>" || n.sent[0].Text != "hi" {
+	if n.sent[0].To != "alice@example.com" || n.sent[0].Subject != "subj" || n.sent[0].HTML != fakeRenderedHTML || n.sent[0].Text != "hi" {
 		t.Fatalf("message not assembled as expected: %+v", n.sent[0])
 	}
 	if s.delivered != 1 {
@@ -37,7 +37,7 @@ func TestDeliver_CategoryDisabled(t *testing.T) {
 	n := &fakeNotifier{}
 	set := defaultSettings()
 	set.EnabledCategories = []v1alpha1.Category{v1alpha1.CategoryUserEnablement} // membership not enabled
-	p, _ := newTestPipeline(s, n, set)
+	p := newTestPipeline(s, n, set)
 
 	results, err := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("a@x.io"), EventKey: "k"})
 	if err != nil {
@@ -52,15 +52,13 @@ func TestDeliver_CategoryDisabled(t *testing.T) {
 }
 
 func TestDeliver_OptOutAll(t *testing.T) {
+	// When the suppressor signals suppression, the pipeline records Suppressed and does not send.
 	s := newFakeStore()
-	subj := userSubject("a@x.io")
-	s.profiles[subj.Name] = &v1alpha1.UserProfile{Spec: v1alpha1.UserProfileSpec{
-		Subject:     subj,
-		Preferences: v1alpha1.NotificationPreferences{OptOutAll: true},
-	}}
 	n := &fakeNotifier{}
-	p, _ := newTestPipeline(s, n, defaultSettings())
+	sup := &fakeSuppressor{suppressed: true, reason: "resource opt-out in project-p"}
+	p := newTestPipelineWithSuppressor(s, n, defaultSettings(), sup)
 
+	subj := userSubject("a@x.io")
 	results, err := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: subj, EventKey: "k"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -72,19 +70,17 @@ func TestDeliver_OptOutAll(t *testing.T) {
 		t.Fatalf("expected MarkSuppressed once, got %d", s.suppressed)
 	}
 	if len(n.sent) != 0 {
-		t.Fatalf("nothing should be sent when opted out")
+		t.Fatalf("nothing should be sent when suppressed")
 	}
 }
 
 func TestDeliver_OptOutCategoryOnly(t *testing.T) {
+	// When the suppressor only suppresses a specific category, other categories are still delivered.
 	s := newFakeStore()
-	subj := userSubject("a@x.io")
-	s.profiles[subj.Name] = &v1alpha1.UserProfile{Spec: v1alpha1.UserProfileSpec{
-		Subject:     subj,
-		Preferences: v1alpha1.NotificationPreferences{OptOutCategories: []v1alpha1.Category{v1alpha1.CategoryMembershipAdded}},
-	}}
 	n := &fakeNotifier{}
-	p, _ := newTestPipeline(s, n, defaultSettings())
+	sup := &fakeSuppressor{suppressed: true, reason: "user opt-out", onlyCategory: v1alpha1.CategoryMembershipAdded}
+	subj := userSubject("a@x.io")
+	p := newTestPipelineWithSuppressor(s, n, defaultSettings(), sup)
 
 	// Opted-out category is suppressed.
 	res, _ := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: subj, EventKey: "k"})
@@ -101,10 +97,10 @@ func TestDeliver_OptOutCategoryOnly(t *testing.T) {
 func TestDeliver_Duplicate(t *testing.T) {
 	s := newFakeStore()
 	n := &fakeNotifier{}
-	p, _ := newTestPipeline(s, n, defaultSettings())
+	p := newTestPipeline(s, n, defaultSettings())
 	ev := Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("a@x.io"), EventKey: "k"}
 	// Mark this notification terminal so Claim returns claimed=false.
-	dk := storeDedupKey(ev, v1alpha1.ChannelEmail, "a@x.io")
+	dk := storeDedupKey(ev, v1alpha1.ChannelEmail)
 	s.terminal[dk] = true
 
 	res, err := p.Deliver(context.Background(), ev)
@@ -122,7 +118,7 @@ func TestDeliver_Duplicate(t *testing.T) {
 func TestDeliver_SendFailure(t *testing.T) {
 	s := newFakeStore()
 	n := &fakeNotifier{sendErr: errors.New("smtp down")}
-	p, _ := newTestPipeline(s, n, defaultSettings())
+	p := newTestPipeline(s, n, defaultSettings())
 
 	res, err := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("a@x.io"), EventKey: "k"})
 	if err == nil {
@@ -140,7 +136,7 @@ func TestDeliver_AddressResolution(t *testing.T) {
 	t.Run("username is email", func(t *testing.T) {
 		s := newFakeStore()
 		n := &fakeNotifier{}
-		p, _ := newTestPipeline(s, n, defaultSettings())
+		p := newTestPipeline(s, n, defaultSettings())
 		res, _ := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("bob@x.io"), EventKey: "k"})
 		if res[0].Outcome != OutcomeDelivered || n.sent[0].To != "bob@x.io" {
 			t.Fatalf("expected delivery to bob@x.io, got %+v / sent %+v", res, n.sent)
@@ -152,7 +148,7 @@ func TestDeliver_AddressResolution(t *testing.T) {
 		subj := userSubject("bob")
 		s.profiles["bob"] = &v1alpha1.UserProfile{Spec: v1alpha1.UserProfileSpec{Subject: subj, Email: "override@x.io"}}
 		n := &fakeNotifier{}
-		p, _ := newTestPipeline(s, n, defaultSettings())
+		p := newTestPipeline(s, n, defaultSettings())
 		_, _ = p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: subj, EventKey: "k"})
 		if len(n.sent) != 1 || n.sent[0].To != "override@x.io" {
 			t.Fatalf("expected delivery to override@x.io, got %+v", n.sent)
@@ -164,7 +160,7 @@ func TestDeliver_AddressResolution(t *testing.T) {
 		n := &fakeNotifier{}
 		set := defaultSettings()
 		set.UsernameIsEmail = false // and no profile email
-		p, _ := newTestPipeline(s, n, set)
+		p := newTestPipeline(s, n, set)
 		res, err := p.Deliver(context.Background(), Event{Category: v1alpha1.CategoryMembershipAdded, Recipient: userSubject("bob"), EventKey: "k"})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -191,9 +187,9 @@ func TestSettingsFromConfig_Defaults(t *testing.T) {
 	}
 }
 
-// storeDedupKey mirrors store.Notification.DedupKey for the given event/channel/address so tests
+// storeDedupKey mirrors store.Notification.DedupKey for the given event/channel so tests
 // can pre-seed a terminal record without importing internal ordering details.
-func storeDedupKey(ev Event, ch v1alpha1.Channel, addr string) string {
+func storeDedupKey(ev Event, ch v1alpha1.Channel) string {
 	// Must match store.Notification.DedupKey field ordering.
 	return string(ev.Category) + "|" + string(ch) + "|" + string(ev.Recipient.Kind) + "|" +
 		ev.Recipient.Namespace + "|" + ev.Recipient.Name + "|" + ev.EventKey

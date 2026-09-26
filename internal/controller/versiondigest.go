@@ -24,6 +24,7 @@ import (
 
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 	"github.com/openmcp-project/platform-service-notifications/internal/notify"
+	"github.com/openmcp-project/platform-service-notifications/internal/optout"
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
@@ -35,11 +36,15 @@ type VersionDigestReconciler struct {
 	onboarding   *clusters.Cluster
 	store        store.Store
 	pipeline     *notify.Pipeline
+	suppressor   optout.Suppressor
 	providerName string
 }
 
-func NewVersionDigestReconciler(platform, onboarding *clusters.Cluster, s store.Store, p *notify.Pipeline, providerName string) *VersionDigestReconciler {
-	return &VersionDigestReconciler{platform: platform, onboarding: onboarding, store: s, pipeline: p, providerName: providerName}
+func NewVersionDigestReconciler(platform, onboarding *clusters.Cluster, s store.Store, p *notify.Pipeline, suppressor optout.Suppressor, providerName string) *VersionDigestReconciler {
+	if suppressor == nil {
+		suppressor = optout.NoOpSuppressor{}
+	}
+	return &VersionDigestReconciler{platform: platform, onboarding: onboarding, store: s, pipeline: p, suppressor: suppressor, providerName: providerName}
 }
 
 func (r *VersionDigestReconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
@@ -57,7 +62,7 @@ func (r *VersionDigestReconciler) Reconcile(ctx context.Context, req reconcile.R
 	}
 	serviceName := sp.Name
 
-	// Aggregate: admin subject -> the control planes that admin can act on.
+	// Aggregate: admin subject -> the control planes that admin can act on, after opt-out.
 	perAdmin := map[string][]notify.AffectedControlPlane{}
 	adminSubject := map[string]v1alpha1.Subject{}
 
@@ -79,7 +84,18 @@ func (r *VersionDigestReconciler) Reconcile(ctx context.Context, req reconcile.R
 				Namespace:  cp.Namespace,
 				ConsoleURL: consoleLink(r.pipeline.WebAppURL(), "ControlPlane", cp.Namespace, cp.Name),
 			}
+			project, workspace := projectWorkspaceFromNamespace(cp.Namespace)
+			cpScope := optout.Scope{Project: project, Workspace: workspace, ControlPlane: cp.Name}
+
 			for _, admin := range controlPlaneAdmins(cp) {
+				// Check opt-out per (admin, control plane) before adding the CP to the digest.
+				suppressed, _, err := r.suppressor.Suppressed(ctx, admin, v1alpha1.CategoryNewServiceVersion, cpScope)
+				if err != nil {
+					return reconcile.Result{}, fmt.Errorf("checking opt-out for admin %s on CP %s: %w", admin.Name, cp.Name, err)
+				}
+				if suppressed {
+					continue
+				}
 				id := subjectID(admin)
 				adminSubject[id] = admin
 				perAdmin[id] = append(perAdmin[id], entry)
@@ -94,6 +110,8 @@ func (r *VersionDigestReconciler) Reconcile(ctx context.Context, req reconcile.R
 	var errs []error
 	for id, cps := range perAdmin {
 		admin := adminSubject[id]
+		// Emit the event with an empty Scope: opt-out was already applied per-CP above,
+		// and the pipeline-level suppressor (NoOpSuppressor for this reconciler) is a no-op.
 		ev := notify.Event{
 			Category:  v1alpha1.CategoryNewServiceVersion,
 			Recipient: admin,

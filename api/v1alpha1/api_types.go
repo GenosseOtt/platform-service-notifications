@@ -39,16 +39,10 @@ type UserProfileSpec struct {
 	Preferences NotificationPreferences `json:"preferences,omitempty"`
 }
 
-// NotificationPreferences captures per-user opt-out and channel selection.
+// NotificationPreferences captures per-user channel selection.
+// Opt-out is now managed via NotificationOptOut / UserNotificationOptOut on the onboarding
+// cluster, where users have direct API access.
 type NotificationPreferences struct {
-	// OptOutAll disables all notifications for this user.
-	// +optional
-	OptOutAll bool `json:"optOutAll,omitempty"`
-
-	// OptOutCategories disables specific categories for this user.
-	// +optional
-	OptOutCategories []Category `json:"optOutCategories,omitempty"`
-
 	// Channels selects preferred delivery channels. When empty, the config default is used.
 	// +optional
 	Channels []Channel `json:"channels,omitempty"`

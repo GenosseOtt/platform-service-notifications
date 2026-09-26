@@ -5,8 +5,11 @@ import (
 	"time"
 
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
+	"github.com/openmcp-project/platform-service-notifications/internal/optout"
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
+
+const fakeRenderedHTML = "<b>hi</b>"
 
 // --- fakes ---
 
@@ -89,7 +92,30 @@ func defaultSettings() Settings {
 	return Settings{EnabledChannels: []v1alpha1.Channel{v1alpha1.ChannelEmail}, UsernameIsEmail: true}
 }
 
-func newTestPipeline(s store.Store, n Notifier, set Settings) (*Pipeline, *fakeRenderer) {
-	r := &fakeRenderer{out: Rendered{Subject: "subj", HTML: "<b>hi</b>", Text: "hi"}}
-	return NewPipeline(s, r, set, n), r
+func newTestPipeline(s store.Store, n Notifier, set Settings) *Pipeline {
+	r := &fakeRenderer{out: Rendered{Subject: "subj", HTML: fakeRenderedHTML, Text: "hi"}}
+	return NewPipeline(s, r, set, nil, n)
+}
+
+func newTestPipelineWithSuppressor(s store.Store, n Notifier, set Settings, sup optout.Suppressor) *Pipeline {
+	r := &fakeRenderer{out: Rendered{Subject: "subj", HTML: fakeRenderedHTML, Text: "hi"}}
+	return NewPipeline(s, r, set, sup, n)
+}
+
+// fakeSuppressor is a controllable Suppressor for pipeline unit tests.
+type fakeSuppressor struct {
+	suppressed   bool
+	reason       string
+	err          error
+	onlyCategory v1alpha1.Category // when set, only suppress this category
+}
+
+func (f *fakeSuppressor) Suppressed(_ context.Context, _ v1alpha1.Subject, cat v1alpha1.Category, _ optout.Scope) (bool, string, error) {
+	if f.err != nil {
+		return false, "", f.err
+	}
+	if f.onlyCategory != "" && cat != f.onlyCategory {
+		return false, "", nil
+	}
+	return f.suppressed, f.reason, nil
 }

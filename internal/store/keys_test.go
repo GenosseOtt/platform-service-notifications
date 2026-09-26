@@ -7,12 +7,14 @@ import (
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 )
 
+const testSubjectEmail = "a@x.io"
+
 func testNotification() Notification {
 	return Notification{
 		Category:         v1alpha1.CategoryMembershipAdded,
 		Channel:          v1alpha1.ChannelEmail,
-		Recipient:        v1alpha1.Subject{Kind: v1alpha1.SubjectKindUser, Namespace: "ns", Name: "a@x.io"},
-		RecipientAddress: "a@x.io",
+		Recipient:        v1alpha1.Subject{Kind: v1alpha1.SubjectKindUser, Namespace: "ns", Name: testSubjectEmail},
+		RecipientAddress: testSubjectEmail,
 		EventKey:         "membership:Project:ns/p:User/ns/a@x.io",
 	}
 }
@@ -71,7 +73,7 @@ func TestRecordName_Valid(t *testing.T) {
 }
 
 func TestProfileName_Valid(t *testing.T) {
-	s := v1alpha1.Subject{Kind: v1alpha1.SubjectKindUser, Namespace: "ns", Name: "a@x.io"}
+	s := v1alpha1.Subject{Kind: v1alpha1.SubjectKindUser, Namespace: "ns", Name: testSubjectEmail}
 	name := ProfileName(s)
 	if !strings.HasPrefix(name, "up-") {
 		t.Errorf("ProfileName should be prefixed up-, got %q", name)
@@ -98,7 +100,7 @@ func isDNS1123Subdomain(s string) bool {
 		return false
 	}
 	for _, r := range s {
-		if !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-') {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
 			return false
 		}
 	}

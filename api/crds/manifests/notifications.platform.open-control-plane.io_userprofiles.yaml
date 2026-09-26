@@ -71,21 +71,6 @@ spec:
                       - Slack
                       type: string
                     type: array
-                  optOutAll:
-                    description: OptOutAll disables all notifications for this user.
-                    type: boolean
-                  optOutCategories:
-                    description: OptOutCategories disables specific categories for
-                      this user.
-                    items:
-                      description: Category is the type of activity a notification
-                        is about.
-                      enum:
-                      - MembershipAdded
-                      - UserEnablement
-                      - NewServiceVersion
-                      type: string
-                    type: array
                 type: object
               subject:
                 description: Subject is the identity this profile belongs to.

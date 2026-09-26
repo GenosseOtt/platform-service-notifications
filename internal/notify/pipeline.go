@@ -8,6 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
+	"github.com/openmcp-project/platform-service-notifications/internal/optout"
 	"github.com/openmcp-project/platform-service-notifications/internal/store"
 )
 
@@ -20,6 +21,12 @@ type Event struct {
 	// at most once per recipient/channel (see store.Notification).
 	EventKey string
 	Data     any
+	// Scope is the resource context of the event, used to evaluate opt-out resources on the
+	// onboarding cluster. An empty Scope (Project=="") skips the onboarding opt-out check;
+	// this is the correct behaviour for UserEnablement (no resource scope) and for pre-filtered
+	// NewServiceVersion events (opt-out is resolved per-CP in the reconciler before Deliver is
+	// called).
+	Scope optout.Scope
 }
 
 // Outcome is the result of attempting delivery on one channel.
@@ -107,21 +114,27 @@ func (s Settings) categoryEnabled(c v1alpha1.Category) bool {
 // preferences and addresses, deduplicates via the Store, renders, sends, and records the
 // outcome. Notifiers and settings can be swapped at runtime as config changes.
 type Pipeline struct {
-	store    store.Store
-	renderer Renderer
+	store      store.Store
+	renderer   Renderer
+	suppressor optout.Suppressor
 
 	mu        sync.RWMutex
 	settings  Settings
 	notifiers map[v1alpha1.Channel]Notifier
 }
 
-// NewPipeline constructs a Pipeline. Notifiers are registered by their Channel().
-func NewPipeline(s store.Store, r Renderer, settings Settings, notifiers ...Notifier) *Pipeline {
+// NewPipeline constructs a Pipeline. When suppressor is nil a no-op suppressor is used
+// (no onboarding opt-out checks). Notifiers are registered by their Channel().
+func NewPipeline(s store.Store, r Renderer, settings Settings, suppressor optout.Suppressor, notifiers ...Notifier) *Pipeline {
+	if suppressor == nil {
+		suppressor = optout.NoOpSuppressor{}
+	}
 	p := &Pipeline{
-		store:     s,
-		renderer:  r,
-		settings:  settings,
-		notifiers: make(map[v1alpha1.Channel]Notifier, len(notifiers)),
+		store:      s,
+		renderer:   r,
+		suppressor: suppressor,
+		settings:   settings,
+		notifiers:  make(map[v1alpha1.Channel]Notifier, len(notifiers)),
 	}
 	for _, n := range notifiers {
 		p.notifiers[n.Channel()] = n
@@ -175,10 +188,17 @@ func (p *Pipeline) Deliver(ctx context.Context, ev Event) ([]ChannelResult, erro
 		return []ChannelResult{{Outcome: OutcomeSkipped}}, nil
 	}
 
-	// Load the recipient's profile once to evaluate opt-out and resolve addresses.
+	// Load the recipient's profile once to evaluate addresses and channel preferences.
 	profile, err := p.store.GetUserProfile(ctx, ev.Recipient)
 	if err != nil {
 		return nil, fmt.Errorf("loading user profile: %w", err)
+	}
+
+	// Evaluate onboarding opt-out once, before the per-channel loop. An empty scope (e.g.
+	// UserEnablement or pre-filtered NewServiceVersion) returns false immediately.
+	suppressed, suppressReason, err := p.suppressor.Suppressed(ctx, ev.Recipient, ev.Category, ev.Scope)
+	if err != nil {
+		return nil, fmt.Errorf("checking opt-out: %w", err)
 	}
 
 	channels := effectiveChannels(settings, profile)
@@ -200,7 +220,7 @@ func (p *Pipeline) Deliver(ctx context.Context, ev Event) ([]ChannelResult, erro
 			continue
 		}
 
-		res := p.deliverChannel(ctx, ev, ch, addr, notifier, profile)
+		res := p.deliverChannel(ctx, ev, ch, addr, notifier, suppressed, suppressReason)
 		results = append(results, res)
 		if res.Err != nil && firstErr == nil {
 			firstErr = res.Err
@@ -211,7 +231,8 @@ func (p *Pipeline) Deliver(ctx context.Context, ev Event) ([]ChannelResult, erro
 }
 
 // deliverChannel handles the claim → (suppress|render→send) → record cycle for one channel.
-func (p *Pipeline) deliverChannel(ctx context.Context, ev Event, ch v1alpha1.Channel, addr string, notifier Notifier, profile *v1alpha1.UserProfile) ChannelResult {
+// suppressed and suppressReason are pre-computed by Deliver before the channel loop.
+func (p *Pipeline) deliverChannel(ctx context.Context, ev Event, ch v1alpha1.Channel, addr string, notifier Notifier, suppressed bool, suppressReason string) ChannelResult {
 	n := store.Notification{
 		Category:         ev.Category,
 		Channel:          ch,
@@ -229,10 +250,10 @@ func (p *Pipeline) deliverChannel(ctx context.Context, ev Event, ch v1alpha1.Cha
 		return ChannelResult{Channel: ch, Outcome: OutcomeDuplicate}
 	}
 
-	// The claim succeeded, so this reconcile owns delivery. If the user opted out of this
-	// category, record a suppression so we never re-evaluate the same event.
-	if optedOut(profile, ev.Category) {
-		if err := p.store.MarkSuppressed(ctx, rec, "user opted out"); err != nil {
+	// The claim succeeded, so this reconcile owns delivery. If an opt-out matches,
+	// record a suppression so we never re-evaluate the same event.
+	if suppressed {
+		if err := p.store.MarkSuppressed(ctx, rec, suppressReason); err != nil {
 			return ChannelResult{Channel: ch, Outcome: OutcomeFailed, Err: fmt.Errorf("recording suppression: %w", err)}
 		}
 		return ChannelResult{Channel: ch, Outcome: OutcomeSuppressed}
@@ -272,22 +293,6 @@ func effectiveChannels(settings Settings, profile *v1alpha1.UserProfile) []v1alp
 		return profile.Spec.Preferences.Channels
 	}
 	return settings.EnabledChannels
-}
-
-// optedOut reports whether the profile opts out of the given category.
-func optedOut(profile *v1alpha1.UserProfile, category v1alpha1.Category) bool {
-	if profile == nil {
-		return false
-	}
-	if profile.Spec.Preferences.OptOutAll {
-		return true
-	}
-	for _, c := range profile.Spec.Preferences.OptOutCategories {
-		if c == category {
-			return true
-		}
-	}
-	return false
 }
 
 // resolveAddress determines the channel destination for a recipient. Today only email is

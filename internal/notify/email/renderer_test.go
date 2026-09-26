@@ -8,6 +8,8 @@ import (
 	"github.com/openmcp-project/platform-service-notifications/internal/notify"
 )
 
+const testRoleAdmin = "admin"
+
 func newRenderer(t *testing.T) *Renderer {
 	t.Helper()
 	r, err := NewRenderer()
@@ -24,7 +26,7 @@ func TestRender_MembershipAdded(t *testing.T) {
 		ResourceKind:        "Project",
 		ResourceName:        "team-a",
 		ResourceDisplayName: "Team A",
-		Role:                "admin",
+		Role:                testRoleAdmin,
 		ConsoleURL:          "https://console/project/ns/team-a",
 	})
 	if err != nil {
@@ -33,7 +35,7 @@ func TestRender_MembershipAdded(t *testing.T) {
 	if strings.TrimSpace(out.Subject) == "" {
 		t.Error("subject must not be empty")
 	}
-	for _, want := range []string{"Team A", "admin"} {
+	for _, want := range []string{"Team A", testRoleAdmin} {
 		if !strings.Contains(out.HTML, want) {
 			t.Errorf("HTML missing %q:\n%s", want, out.HTML)
 		}
@@ -119,7 +121,7 @@ func TestRender_HTMLEscaping(t *testing.T) {
 		ResourceKind:        "Project",
 		ResourceName:        "p",
 		ResourceDisplayName: "<script>alert(1)</script>",
-		Role:                "admin",
+		Role:                testRoleAdmin,
 	})
 	if err != nil {
 		t.Fatalf("Render: %v", err)
