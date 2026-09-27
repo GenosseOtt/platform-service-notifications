@@ -23,11 +23,15 @@ Two guarantees underpin all of this:
 
 ## What it notifies about
 
-| Category | Trigger | Recipient |
-|---|---|---|
-| `MembershipAdded` | A subject is added to a `Project`, `Workspace`, or (V2) `ControlPlane` | the added user |
-| `UserEnablement` | A user is seen on the platform for the first time | the new user (once) |
-| `NewServiceVersion` | A service's image (version) changes | admins of the affected ControlPlanes, **aggregated into one digest per admin** |
+| Category | Trigger | Recipient | |
+|---|---|---|---|
+| `MembershipAdded` | A subject is added to a `Project`, `Workspace`, or (V2) `ControlPlane` | the added user | ![img](./mail_added.jpeg) |
+| `UserEnablement` | A user is seen on the platform for the first time | the new user (once) | ![img](./mail_welcome_platform.jpeg)  |
+| `NewServiceVersion` | A service's image (version) changes | admins of the affected ControlPlanes, **aggregated into one digest per admin** | ![img](./mail_new_versions.jpeg)|
+
+
+
+
 
 ## How it works
 
