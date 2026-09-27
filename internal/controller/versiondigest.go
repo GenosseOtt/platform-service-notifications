@@ -125,6 +125,7 @@ func (r *VersionDigestReconciler) Reconcile(ctx context.Context, req reconcile.R
 				NewVersion:            newVersion,
 				AffectedControlPlanes: cps,
 				ConsoleURL:            r.pipeline.WebAppURL(),
+				SupportURL:            r.pipeline.SupportURL(),
 			},
 		}
 		if _, err := r.pipeline.Deliver(ctx, ev); err != nil {

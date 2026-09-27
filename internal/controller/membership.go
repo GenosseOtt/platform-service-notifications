@@ -67,6 +67,8 @@ func (h *membershipHandler) process(ctx context.Context, kind, namespace, name, 
 				ResourceDisplayName: displayName,
 				Role:                m.role,
 				ConsoleURL:          consoleLink(h.pipeline.WebAppURL(), kind, namespace, name),
+				ConnectURL:          h.pipeline.ConnectURL(),
+				SupportURL:          h.pipeline.SupportURL(),
 			},
 		}
 		if _, err := h.pipeline.Deliver(ctx, ev); err != nil {

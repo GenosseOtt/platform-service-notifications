@@ -69,6 +69,10 @@ type Settings struct {
 	ProductName string
 	// DocsURL is the user documentation link surfaced in the enablement email.
 	DocsURL string
+	// ConnectURL is a link to docs on connecting kubectl/tools, surfaced in membership-added emails.
+	ConnectURL string
+	// SupportURL is a link to the support repo/issue tracker, shown in all email footers.
+	SupportURL string
 }
 
 // DefaultProductName is used when the config does not set a product name.
@@ -95,6 +99,8 @@ func SettingsFromConfig(spec v1alpha1.NotificationConfigSpec) Settings {
 		WebAppURL:         spec.WebAppURL,
 		ProductName:       productName,
 		DocsURL:           spec.DocsURL,
+		ConnectURL:        spec.ConnectURL,
+		SupportURL:        spec.SupportURL,
 	}
 }
 
@@ -171,6 +177,20 @@ func (p *Pipeline) DocsURL() string {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.settings.DocsURL
+}
+
+// ConnectURL returns the configured link to tool-connection documentation.
+func (p *Pipeline) ConnectURL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.settings.ConnectURL
+}
+
+// SupportURL returns the configured support repository / issue tracker link.
+func (p *Pipeline) SupportURL() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.settings.SupportURL
 }
 
 // Deliver processes one event for one recipient across the recipient's effective channels.

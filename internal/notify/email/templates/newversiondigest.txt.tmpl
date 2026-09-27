@@ -4,13 +4,15 @@ A new version of {{.ServiceName}} is available
 Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
 
 Version {{.NewVersion}} of {{.ServiceName}} is now available. The following control
-plane{{if ne (len .AffectedControlPlanes) 1}}s you administer use{{else}} you administer uses{{end}} this service:
+plane{{if ne (len .AffectedControlPlanes) 1}}s use{{else}} uses{{end}} this service:
 {{range .AffectedControlPlanes}}
   - {{.Name}} (ns: {{.Namespace}}){{if .CurrentVersion}}, current: {{.CurrentVersion}}{{end}}{{if .ConsoleURL}}
-    {{.ConsoleURL}}{{end}}{{end}}
+    Open in webapp: {{.ConsoleURL}}{{end}}{{end}}
 {{if .ConsoleURL}}
-Review upgrades: {{.ConsoleURL}}
+Open in webapp: {{.ConsoleURL}}
 {{end}}
 --
 You received this message because of activity on the {{$product}} platform.
-To change what you are notified about or to opt out, update your notification preferences.
+To manage notifications, create a UserNotificationOptOut on your workspace.
+{{if .SupportURL}}Found a bug or have a request? {{.SupportURL}}
+{{end}}

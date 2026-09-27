@@ -58,6 +58,7 @@ func (r *EnablementReconciler) Reconcile(ctx context.Context, req reconcile.Requ
 			RecipientName: profile.Spec.Subject.Name,
 			ConsoleURL:    r.pipeline.WebAppURL(),
 			DocsURL:       r.pipeline.DocsURL(),
+			SupportURL:    r.pipeline.SupportURL(),
 		},
 	}
 	if _, err := r.pipeline.Deliver(ctx, ev); err != nil {

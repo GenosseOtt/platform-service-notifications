@@ -8,8 +8,11 @@ You have been granted the {{.Role}} role on the {{.ResourceKind}} "{{if .Resourc
   {{.ResourceKind}}: {{.ResourceName}}
   Role:     {{.Role}}
 {{if .ConsoleURL}}
-Open in console: {{.ConsoleURL}}
+Open in webapp: {{.ConsoleURL}}
+{{end}}{{if .ConnectURL}}Get kubeconfig: {{.ConnectURL}}
 {{end}}
 --
 You received this message because of activity on the {{$product}} platform.
-To change what you are notified about or to opt out, update your notification preferences.
+To manage notifications, create a UserNotificationOptOut on your workspace.
+{{if .SupportURL}}Found a bug or have a request? {{.SupportURL}}
+{{end}}

@@ -1,27 +1,58 @@
 {{define "content" -}}
 {{- $product := .ProductName}}{{if not $product}}{{$product = "Open Control Plane"}}{{end -}}
-<h1 style="margin:0 0 16px; font-size:22px; line-height:28px; color:#1a1a1a;">Welcome to {{$product}}</h1>
-<p style="margin:0 0 16px; font-size:15px; line-height:22px; color:#33363a;">
-Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
+
+<h1 style="margin:0 0 18px; font-size:24px; line-height:30px; color:#012931; font-weight:700;">
+  Welcome to {{$product}}
+</h1>
+<p style="margin:0 0 16px; font-size:15px; line-height:23px; color:#33363a;">
+  Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
 </p>
-<p style="margin:0 0 20px; font-size:15px; line-height:22px; color:#33363a;">
-Your account is now active on {{$product}}. From here you can be added to
-projects and workspaces, and manage control planes your teams rely on.
+<p style="margin:0 0 20px; font-size:15px; line-height:23px; color:#33363a;">
+  Your account is now active. {{$product}} is an <strong>Infrastructure-as-Data</strong> platform — it lets your team manage cloud landscapes declaratively through <strong>ControlPlanes</strong>, built on open-source Kubernetes and Crossplane technology.
 </p>
-<p style="margin:0 0 20px; font-size:15px; line-height:22px; color:#33363a;">
-To get started, take a look at the documentation and open the console.
-</p>
+
+<!-- Value bullets -->
+<table role="presentation" cellpadding="0" cellspacing="0" width="100%"
+       style="margin:0 0 26px; background-color:#f5fffe; border-radius:7px; border-left:4px solid #2CE0BF;">
+<tr><td style="padding:18px 20px;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+  <tr><td style="padding:4px 0; font-size:14px; line-height:21px; color:#33363a;">
+    <span style="color:#07838F; font-weight:700; margin-right:8px;">&#10003;</span>
+    Define entire cloud landscapes — databases, clusters, SaaS — as code, not clicks.
+  </td></tr>
+  <tr><td style="padding:4px 0; font-size:14px; line-height:21px; color:#33363a;">
+    <span style="color:#07838F; font-weight:700; margin-right:8px;">&#10003;</span>
+    ControlPlanes reconcile your desired state continuously across any cloud provider.
+  </td></tr>
+  <tr><td style="padding:4px 0; font-size:14px; line-height:21px; color:#33363a;">
+    <span style="color:#07838F; font-weight:700; margin-right:8px;">&#10003;</span>
+    Managed Crossplane, Flux, External Secrets and more — so you focus on your product, not the tooling.
+  </td></tr>
+  </table>
+</td></tr>
+</table>
+
+<!-- CTAs -->
 <table role="presentation" cellpadding="0" cellspacing="0"><tr>
 {{if .ConsoleURL -}}
-<td style="border-radius:6px; background-color:#0a6ed1;">
-<a href="{{.ConsoleURL}}" style="display:inline-block; padding:12px 24px; font-size:15px; font-weight:600; color:#ffffff; text-decoration:none;">Open console</a>
+<td style="border-radius:7px; background-color:#07838F;">
+  <a href="{{.ConsoleURL}}" style="display:inline-block; padding:12px 26px; font-size:15px; font-weight:600; color:#ffffff; text-decoration:none;">
+    Open webapp &#8594;
+  </a>
 </td>
-<td style="width:12px;">&nbsp;</td>
+<td style="width:14px;">&nbsp;</td>
 {{- end}}
 {{if .DocsURL -}}
-<td style="border-radius:6px; border:1px solid #0a6ed1;">
-<a href="{{.DocsURL}}" style="display:inline-block; padding:12px 24px; font-size:15px; font-weight:600; color:#0a6ed1; text-decoration:none;">Read the docs</a>
+<td style="border-radius:7px; border:2px solid #07838F;">
+  <a href="{{.DocsURL}}" style="display:inline-block; padding:10px 24px; font-size:15px; font-weight:600; color:#07838F; text-decoration:none;">
+    Learn more about the platform
+  </a>
 </td>
 {{- end}}
 </tr></table>
+{{if .SupportURL -}}
+<p style="margin:18px 0 0; font-size:12px; line-height:18px; color:#98989f;">
+  <strong>Found a bug or have a request?</strong> <a href="{{.SupportURL}}" style="color:#98989f; text-decoration:underline; font-weight:700;">Create support issue.</a>
+</p>
+{{- end}}
 {{- end}}

@@ -3,13 +3,18 @@ Welcome to {{$product}}
 
 Hi{{if .RecipientName}} {{.RecipientName}}{{end}},
 
-Your account is now active on {{$product}}. From here you can be
-added to projects and workspaces, and manage control planes your teams rely on.
+Your account is now active on {{$product}}.
+
+{{$product}} is an Infrastructure-as-Data platform. Define cloud landscapes as code,
+let ControlPlanes reconcile your desired state across any cloud — Crossplane, Flux,
+External Secrets and more are managed for you.
 
 To get started:
-{{if .ConsoleURL}}  Open the console: {{.ConsoleURL}}
-{{end}}{{if .DocsURL}}  Read the docs:    {{.DocsURL}}
+{{if .ConsoleURL}}  Open webapp:               {{.ConsoleURL}}
+{{end}}{{if .DocsURL}}  Learn more about platform: {{.DocsURL}}
 {{end}}
 --
 You received this message because of activity on the {{$product}} platform.
-To change what you are notified about or to opt out, update your notification preferences.
+To manage notifications, create a UserNotificationOptOut on your workspace.
+{{if .SupportURL}}Found a bug or have a request? {{.SupportURL}}
+{{end}}

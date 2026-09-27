@@ -43,6 +43,16 @@ type NotificationConfigSpec struct {
 	// +optional
 	DocsURL string `json:"docsURL,omitempty"`
 
+	// ConnectURL is a link to documentation on how to connect tools such as kubectl
+	// to a control plane. Surfaced as a secondary button in membership-added emails.
+	// +optional
+	ConnectURL string `json:"connectURL,omitempty"`
+
+	// SupportURL is a link to a support repository or issue tracker where users can
+	// report bugs, request features, or ask questions. Shown subtly in all email footers.
+	// +optional
+	SupportURL string `json:"supportURL,omitempty"`
+
 	// EnabledCategories lists the activity categories that produce notifications.
 	// When empty, all categories are enabled.
 	// +optional
