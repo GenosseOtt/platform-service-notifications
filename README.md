@@ -11,8 +11,8 @@ This service notifies platform users about activity that concerns them:
   link to the resource.
 - A user is seen on the platform for the first time → they get a one-time welcome / enablement
   email pointing at the docs.
-- A newer version of a service becomes available → the admins of the affected `ControlPlane`s get
-  **one aggregated digest each** (never one email per control plane).
+- _(planned)_ A user's `ControlPlane` is running an outdated service or provider version → the
+  admins get one aggregated digest per admin encouraging them to upgrade.
 
 Two guarantees underpin all of this:
 
@@ -27,7 +27,7 @@ Two guarantees underpin all of this:
 |---|---|---|---|
 | `MembershipAdded` | A subject is added to a `Project`, `Workspace`, or (V2) `ControlPlane` | the added user | ![img](./mail_added.jpeg) |
 | `UserEnablement` | A user is seen on the platform for the first time | the new user (once) | ![img](./mail_welcome_platform.jpeg)  |
-| `NewServiceVersion` | A service's image (version) changes | admins of the affected ControlPlanes, **aggregated into one digest per admin** | ![img](./mail_new_versions.jpeg)|
+| `NewServiceVersion` | _(disabled — see below)_ A ControlPlane is running an outdated service/provider version | admins of affected ControlPlanes, aggregated into one digest | ![img](./mail_new_versions.jpeg)|
 
 
 
@@ -255,7 +255,6 @@ While the landscape is live you can interact freely:
 - Edit `NotificationConfig` (e.g. set `productName`) → the service hot-reloads within seconds.
 - Create a `UserNotificationOptOut` for a user → subsequent emails are suppressed;
   check the `NotificationRecord` status (`phase: Suppressed`).
-- Bump a `ServiceProvider` image tag → admins of affected ControlPlanes receive a digest.
 
 This full delivery scenario is the current e2e milestone; the config-smoke suite (`task test-e2e`)
 remains the CI gate.
@@ -276,6 +275,12 @@ golden-ish assertions on the rendered email templates (including HTML escaping).
 
 ## Roadmap / not yet in scope
 
+- **Version digest (`NewServiceVersion`):** notify admins when a `ControlPlane` is running an
+  outdated service or provider version. The `VersionDigestReconciler` is scaffolded but disabled
+  (see [run.go](cmd/platform-service-notifications/app/run.go)) pending a catalog CRD that exposes
+  available versions — analogous to `ManagedComponents` in the V1 offering. Once that resource
+  exists on the onboarding cluster, the reconciler needs to be reimplemented as a scheduled
+  comparison of installed vs. available versions, then re-enabled.
 - Slack `Notifier`; MJML templates; a self-service opt-out link (needs a small HTTP endpoint).
 - OIDC `email`-claim resolution (today: username-is-email, or a `UserProfile.spec.email` override).
 
