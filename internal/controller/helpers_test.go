@@ -122,19 +122,34 @@ func TestProjectWorkspaceFromNamespace(t *testing.T) {
 	}
 }
 
-func TestParseImageTag(t *testing.T) {
-	cases := map[string]string{
-		"repo/img:v1.2.3":                 "v1.2.3",
-		"ghcr.io/org/img:latest":          "latest",
-		"registry:5000/org/img:v2":        "v2", // registry port must not confuse tag parsing
-		"img":                             "",   // untagged
-		"registry:5000/img":               "",   // untagged with registry port
-		"img@sha256:abc":                  "sha256:abc",
-		"ghcr.io/org/img@sha256:deadbeef": "sha256:deadbeef",
+func TestParseServiceGVK(t *testing.T) {
+	cases := []struct {
+		kind       string
+		apiVersion string
+		wantGroup  string
+		wantVer    string
+		wantErr    bool
+	}{
+		{"MyKind", "mygroup.io/v1", "mygroup.io", "v1", false},
+		{"MyKind", "v1", "", "v1", false},
+		{"MyKind", "services.example.io/v1beta1", "services.example.io", "v1beta1", false},
+		{"MyKind", "", "", "", true},
 	}
-	for in, want := range cases {
-		if got := parseImageTag(in); got != want {
-			t.Errorf("parseImageTag(%q) = %q, want %q", in, got, want)
+	for _, tc := range cases {
+		gvk, err := parseServiceGVK(tc.kind, tc.apiVersion)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseServiceGVK(%q, %q): expected error, got none", tc.kind, tc.apiVersion)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("parseServiceGVK(%q, %q): unexpected error: %v", tc.kind, tc.apiVersion, err)
+			continue
+		}
+		if gvk.Group != tc.wantGroup || gvk.Version != tc.wantVer || gvk.Kind != tc.kind {
+			t.Errorf("parseServiceGVK(%q, %q) = %v, want group=%q ver=%q kind=%q",
+				tc.kind, tc.apiVersion, gvk, tc.wantGroup, tc.wantVer, tc.kind)
 		}
 	}
 }

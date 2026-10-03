@@ -243,9 +243,9 @@ func (o *RunOptions) Run(ctx context.Context) error {
 					Verbs:     []string{"get", "list", "watch"}, //nolint:goconst
 				},
 				{
-					// Service instances mapped from ServiceProvider.status.resources have dynamic
-					// GVKs, so we need read access to arbitrary resources to locate affected
-					// control planes. TODO: tighten once the set of service GVKs is enumerable.
+					// ManagedService catalog and the service instances it describes have dynamic
+					// GVKs (kind+apiVersion from ManagedService.spec.services), so we need read
+					// access to arbitrary resources to locate affected control planes.
 					APIGroups: []string{"*"},
 					Resources: []string{"*"},
 					Verbs:     []string{"get", "list", "watch"}, //nolint:goconst
@@ -329,18 +329,9 @@ func (o *RunOptions) Run(ctx context.Context) error {
 	if err := controller.NewEnablementReconciler(o.PlatformCluster, notifStore, pipeline, o.ProviderName).SetupWithManager(mgr); err != nil {
 		return fmt.Errorf("unable to add EnablementReconciler to manager: %w", err)
 	}
-	// VersionDigestReconciler is intentionally disabled.
-	//
-	// The intended design is: compare each ControlPlane's installed service/provider versions
-	// against a platform-provided catalog of available versions (analogous to ManagedComponents
-	// in the V1 offering), and notify admins when their CP is running an outdated version.
-	//
-	// The catalog CRD does not yet exist on the V2 onboarding cluster. Re-enable this
-	// reconciler (and rewrite its watch/comparison logic) once the catalog resource is available.
-	//
-	// if err := controller.NewVersionDigestReconciler(o.PlatformCluster, onboardingCluster, notifStore, pipeline, suppressor, o.ProviderName).SetupWithManager(mgr); err != nil {
-	// 	return fmt.Errorf("unable to add VersionDigestReconciler to manager: %w", err)
-	// }
+	if err := controller.NewVersionDigestReconciler(onboardingCluster, notifStore, pipeline, suppressor, o.ProviderName).SetupWithManager(mgr); err != nil {
+		return fmt.Errorf("unable to add VersionDigestReconciler to manager: %w", err)
+	}
 
 	if o.MetricsCertWatcher != nil {
 		setupLog.Info("Adding metrics certificate watcher to manager")

@@ -17,7 +17,6 @@ import (
 	"github.com/openmcp-project/controller-utils/pkg/clusters"
 	commonapi "github.com/openmcp-project/openmcp-operator/api/common"
 	cpv2alpha1 "github.com/openmcp-project/openmcp-operator/api/core/v2alpha1"
-	providerv1alpha1 "github.com/openmcp-project/openmcp-operator/api/provider/v1alpha1"
 
 	"github.com/openmcp-project/platform-service-notifications/api/v1alpha1"
 	"github.com/openmcp-project/platform-service-notifications/internal/notify"
@@ -26,14 +25,6 @@ import (
 )
 
 // ─── schemes ────────────────────────────────────────────────────────────────
-
-var digestPlatformScheme = func() *runtime.Scheme {
-	s := runtime.NewScheme()
-	if err := providerv1alpha1.AddToScheme(s); err != nil {
-		panic(err)
-	}
-	return s
-}()
 
 var digestOnboardingScheme = func() *runtime.Scheme {
 	s := runtime.NewScheme()
@@ -138,13 +129,29 @@ func digestCP(name, ns string, adminEmails ...string) *cpv2alpha1.ControlPlane {
 	return cp
 }
 
-// digestSP creates a ServiceProvider whose image contains a tag and whose status lists one GVK.
-func digestSP(name, image string, gvk metav1.GroupVersionKind) *providerv1alpha1.ServiceProvider {
-	sp := &providerv1alpha1.ServiceProvider{}
-	sp.Name = name
-	sp.Spec.Image = image
-	sp.Status.Resources = []metav1.GroupVersionKind{gvk}
-	return sp
+// digestMS creates an unstructured ManagedService with a single service entry using the given GVK
+// and versions. The object is named "catalog" (cluster-scoped).
+func digestMS(serviceName string, gvk metav1.GroupVersionKind, versions ...string) *unstructured.Unstructured {
+	versionsList := make([]interface{}, 0, len(versions))
+	for _, v := range versions {
+		versionsList = append(versionsList, map[string]interface{}{"version": v})
+	}
+	apiVersion := gvk.Version
+	if gvk.Group != "" {
+		apiVersion = gvk.Group + "/" + gvk.Version
+	}
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(managedServiceGVK)
+	obj.SetName("catalog")
+	_ = unstructured.SetNestedSlice(obj.Object, []interface{}{
+		map[string]interface{}{
+			"name":       serviceName,
+			"kind":       gvk.Kind,
+			"apiVersion": apiVersion,
+			"versions":   versionsList,
+		},
+	}, "spec", "services")
+	return obj
 }
 
 // digestSvcInst creates an unstructured service instance whose (name, ns) matches its ControlPlane.
@@ -160,7 +167,7 @@ func digestSvcInst(group, version, kind, name, ns string) *unstructured.Unstruct
 
 // buildDigestReconciler wires up all fakes and returns a VersionDigestReconciler ready to Reconcile.
 func buildDigestReconciler(
-	sp *providerv1alpha1.ServiceProvider,
+	ms *unstructured.Unstructured,
 	cps []*cpv2alpha1.ControlPlane,
 	svcInsts []*unstructured.Unstructured,
 	st *digestStore,
@@ -168,15 +175,9 @@ func buildDigestReconciler(
 	r *digestRenderer,
 	sup optout.Suppressor,
 ) *VersionDigestReconciler {
-	// Platform cluster: knows the ServiceProvider.
-	platFake := fake.NewClientBuilder().
-		WithScheme(digestPlatformScheme).
-		WithObjects(sp).
-		Build()
-	platCluster := clusters.NewTestClusterFromClient("platform", platFake)
-
-	// Onboarding cluster: knows ControlPlanes + unstructured service instances.
-	onboardingObjs := make([]client.Object, 0, len(cps)+len(svcInsts))
+	// Onboarding cluster: knows ManagedService, ControlPlanes, and unstructured service instances.
+	onboardingObjs := make([]client.Object, 0, 1+len(cps)+len(svcInsts))
+	onboardingObjs = append(onboardingObjs, ms)
 	for _, cp := range cps {
 		onboardingObjs = append(onboardingObjs, cp)
 	}
@@ -201,7 +202,7 @@ func buildDigestReconciler(
 		n,
 	)
 
-	return NewVersionDigestReconciler(platCluster, onboardingCluster, st, pipeline, sup, "test-provider")
+	return NewVersionDigestReconciler(onboardingCluster, st, pipeline, sup, "test-provider")
 }
 
 // ─── tests ───────────────────────────────────────────────────────────────────
@@ -212,10 +213,10 @@ var svcGVK = metav1.GroupVersionKind{Group: "services.test", Version: "v1", Kind
 // testCPNS is a workspace namespace so projectWorkspaceFromNamespace resolves to a valid pair.
 const testCPNS = "project-poc--ws-dev"
 
-func reconcileDigest(t *testing.T, rec *VersionDigestReconciler, spName string) {
+func reconcileDigest(t *testing.T, rec *VersionDigestReconciler, name string) {
 	t.Helper()
 	_, err := rec.Reconcile(context.Background(), reconcile.Request{
-		NamespacedName: client.ObjectKey{Name: spName},
+		NamespacedName: client.ObjectKey{Name: name},
 	})
 	if err != nil {
 		t.Fatalf("Reconcile returned unexpected error: %v", err)
@@ -225,11 +226,6 @@ func reconcileDigest(t *testing.T, rec *VersionDigestReconciler, spName string) 
 // TestVersionDigestReconciler_OneAdmin_OneDigest verifies that a single admin with two
 // affected ControlPlanes receives exactly one email containing both CPs.
 func TestVersionDigestReconciler_OneAdmin_OneDigest(t *testing.T) {
-	const (
-		spName  = "crossplane"
-		spImage = "ghcr.io/crossplane/crossplane:v1.2.1"
-	)
-
 	cp1 := digestCP("cp-alpha", testCPNS, "alice@x.io")
 	cp2 := digestCP("cp-beta", testCPNS, "alice@x.io")
 	inst1 := digestSvcInst(svcGVK.Group, svcGVK.Version, svcGVK.Kind, "cp-alpha", testCPNS)
@@ -239,8 +235,9 @@ func TestVersionDigestReconciler_OneAdmin_OneDigest(t *testing.T) {
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP(spName, spImage, svcGVK), []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
-	reconcileDigest(t, rec, spName)
+	ms := digestMS("crossplane", svcGVK, "v1.2.1")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 1 {
 		t.Fatalf("expected 1 email sent, got %d: %v", len(n.recipients), n.recipients)
@@ -256,8 +253,8 @@ func TestVersionDigestReconciler_OneAdmin_OneDigest(t *testing.T) {
 	if data.NewVersion != "v1.2.1" {
 		t.Errorf("expected NewVersion=v1.2.1, got %q", data.NewVersion)
 	}
-	if data.ServiceName != spName {
-		t.Errorf("expected ServiceName=%q, got %q", spName, data.ServiceName)
+	if data.ServiceName != "crossplane" {
+		t.Errorf("expected ServiceName=%q, got %q", "crossplane", data.ServiceName)
 	}
 }
 
@@ -273,8 +270,9 @@ func TestVersionDigestReconciler_TwoAdmins_SeparateDigests(t *testing.T) {
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP("svc", "img:v2", svcGVK), []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
-	reconcileDigest(t, rec, "svc")
+	ms := digestMS("svc", svcGVK, "v2")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 2 {
 		t.Fatalf("expected 2 emails (one per admin), got %d: %v", len(n.recipients), n.recipients)
@@ -308,8 +306,9 @@ func TestVersionDigestReconciler_SharedAdmin_AllCPsInOneDigest(t *testing.T) {
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP("svc", "img:v3", svcGVK), []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
-	reconcileDigest(t, rec, "svc")
+	ms := digestMS("svc", svcGVK, "v3")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	// alice and bob each get exactly 1 email.
 	if len(n.recipients) != 2 {
@@ -334,48 +333,51 @@ func TestVersionDigestReconciler_SharedAdmin_AllCPsInOneDigest(t *testing.T) {
 	}
 }
 
-// TestVersionDigestReconciler_NoTag_NoDelivery verifies that a ServiceProvider image without
-// a discernible tag produces no notifications.
-func TestVersionDigestReconciler_NoTag_NoDelivery(t *testing.T) {
+// TestVersionDigestReconciler_NoVersions_NoDelivery verifies that a ManagedService with a service
+// entry that has no versions listed produces no notifications.
+func TestVersionDigestReconciler_NoVersions_NoDelivery(t *testing.T) {
 	cp := digestCP("cp", testCPNS, "alice@x.io")
 	inst := digestSvcInst(svcGVK.Group, svcGVK.Version, svcGVK.Kind, "cp", testCPNS)
+
+	// digestMS with no version arguments → empty versions list
+	ms := digestMS("svc", svcGVK)
 
 	st := &digestStore{}
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP("svc", "ghcr.io/org/img", svcGVK), []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
-	reconcileDigest(t, rec, "svc")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 0 {
-		t.Errorf("no delivery expected for untagged image, got %d sends: %v", len(n.recipients), n.recipients)
+		t.Errorf("no delivery expected for service with no versions, got %d sends: %v", len(n.recipients), n.recipients)
 	}
 }
 
-// TestVersionDigestReconciler_NoResources_NoDelivery verifies that a ServiceProvider with no
-// status.resources (no mapped GVKs) sends no notifications.
-func TestVersionDigestReconciler_NoResources_NoDelivery(t *testing.T) {
-	sp := &providerv1alpha1.ServiceProvider{}
-	sp.Name = "svc"
-	sp.Spec.Image = "img:v1"
-	// sp.Status.Resources is empty — no GVKs to list
+// TestVersionDigestReconciler_NoServices_NoDelivery verifies that a ManagedService with an empty
+// spec.services list sends no notifications.
+func TestVersionDigestReconciler_NoServices_NoDelivery(t *testing.T) {
+	// ManagedService with no services at all.
+	ms := &unstructured.Unstructured{}
+	ms.SetGroupVersionKind(managedServiceGVK)
+	ms.SetName("catalog")
 
-	platFake := fake.NewClientBuilder().WithScheme(digestPlatformScheme).WithObjects(sp).Build()
-	onboardingFake := fake.NewClientBuilder().WithScheme(digestOnboardingScheme).Build()
+	onboardingFake := fake.NewClientBuilder().
+		WithScheme(digestOnboardingScheme).
+		WithObjects(ms).
+		Build()
+	onboardingCluster := clusters.NewTestClusterFromClient("onboarding", onboardingFake)
+
 	st := &digestStore{}
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 	pipeline := notify.NewPipeline(st, r, notify.Settings{EnabledChannels: []v1alpha1.Channel{v1alpha1.ChannelEmail}, UsernameIsEmail: true}, nil, n)
 
-	rec := NewVersionDigestReconciler(
-		clusters.NewTestClusterFromClient("platform", platFake),
-		clusters.NewTestClusterFromClient("onboarding", onboardingFake),
-		st, pipeline, nil, "test",
-	)
-	reconcileDigest(t, rec, "svc")
+	rec := NewVersionDigestReconciler(onboardingCluster, st, pipeline, nil, "test")
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 0 {
-		t.Errorf("no delivery expected for empty status.resources, got %d sends", len(n.recipients))
+		t.Errorf("no delivery expected for empty spec.services, got %d sends", len(n.recipients))
 	}
 }
 
@@ -393,8 +395,9 @@ func TestVersionDigestReconciler_OptOut_OneCPExcluded(t *testing.T) {
 	// alice opted out of "cp-muted" only.
 	sup := &digestSuppressor{blocked: map[string]bool{"alice@x.io/cp-muted": true}}
 
-	rec := buildDigestReconciler(digestSP("svc", "img:v4", svcGVK), []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, sup)
-	reconcileDigest(t, rec, "svc")
+	ms := digestMS("svc", svcGVK, "v4")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp1, cp2}, []*unstructured.Unstructured{inst1, inst2}, st, n, r, sup)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 1 {
 		t.Fatalf("expected alice to still receive a digest, got %d sends: %v", len(n.recipients), n.recipients)
@@ -419,8 +422,9 @@ func TestVersionDigestReconciler_AllOptedOut_NoDelivery(t *testing.T) {
 	r := &digestRenderer{}
 	sup := &digestSuppressor{blocked: map[string]bool{"alice@x.io/cp-muted": true}}
 
-	rec := buildDigestReconciler(digestSP("svc", "img:v5", svcGVK), []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, sup)
-	reconcileDigest(t, rec, "svc")
+	ms := digestMS("svc", svcGVK, "v5")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, sup)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 0 {
 		t.Errorf("expected no email when all CPs are opted out, got %d sends: %v", len(n.recipients), n.recipients)
@@ -453,8 +457,9 @@ func TestVersionDigestReconciler_ViewersNotNotified(t *testing.T) {
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP("svc", "img:v6", svcGVK), []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
-	reconcileDigest(t, rec, "svc")
+	ms := digestMS("svc", svcGVK, "v6")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(n.recipients) != 1 {
 		t.Fatalf("expected exactly 1 recipient (admin only), got %d: %v", len(n.recipients), n.recipients)
@@ -474,8 +479,9 @@ func TestVersionDigestReconciler_EventKeyIncludesServiceAndVersion(t *testing.T)
 	n := &digestNotifier{}
 	r := &digestRenderer{}
 
-	rec := buildDigestReconciler(digestSP("crossplane", "img:v1.14.0", svcGVK), []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
-	reconcileDigest(t, rec, "crossplane")
+	ms := digestMS("crossplane", svcGVK, "v1.14.0")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
 
 	if len(st.claimed) == 0 {
 		t.Fatal("expected at least one claimed notification")
@@ -483,5 +489,32 @@ func TestVersionDigestReconciler_EventKeyIncludesServiceAndVersion(t *testing.T)
 	wantKey := "newversion:crossplane:v1.14.0"
 	if st.claimed[0].EventKey != wantKey {
 		t.Errorf("expected EventKey=%q, got %q", wantKey, st.claimed[0].EventKey)
+	}
+}
+
+// TestVersionDigestReconciler_MultipleVersions_OneNotifPerVersion verifies that each version
+// listed in the catalog produces an independent notification (dedup key includes the version).
+func TestVersionDigestReconciler_MultipleVersions_OneNotifPerVersion(t *testing.T) {
+	cp := digestCP("cp", testCPNS, "alice@x.io")
+	inst := digestSvcInst(svcGVK.Group, svcGVK.Version, svcGVK.Kind, "cp", testCPNS)
+
+	st := &digestStore{}
+	n := &digestNotifier{}
+	r := &digestRenderer{}
+
+	ms := digestMS("crossplane", svcGVK, "v1.13.0", "v1.14.0")
+	rec := buildDigestReconciler(ms, []*cpv2alpha1.ControlPlane{cp}, []*unstructured.Unstructured{inst}, st, n, r, nil)
+	reconcileDigest(t, rec, "catalog")
+
+	// Two versions → two claims, two emails.
+	if len(st.claimed) != 2 {
+		t.Fatalf("expected 2 claimed notifications (one per version), got %d", len(st.claimed))
+	}
+	keys := map[string]bool{}
+	for _, c := range st.claimed {
+		keys[c.EventKey] = true
+	}
+	if !keys["newversion:crossplane:v1.13.0"] || !keys["newversion:crossplane:v1.14.0"] {
+		t.Errorf("expected keys for both versions, got %v", keys)
 	}
 }
